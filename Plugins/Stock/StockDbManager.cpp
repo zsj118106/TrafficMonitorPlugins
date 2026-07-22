@@ -810,13 +810,23 @@ void CStockDbManager::CleanExpiredAvgDiffStats()
 {
 	if (m_db == nullptr) return;
 
+	// 删除7天前的过期数据
 	std::string cutoffDate = GetCacheCutoffDateString();
-
-	const char* sql = "DELETE FROM avg_diff_stats WHERE update_time < ?;";
+	const char* sql1 = "DELETE FROM avg_diff_stats WHERE update_time < ?;";
 	sqlite3_stmt* stmt = nullptr;
-	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
+	if (sqlite3_prepare_v2(m_db, sql1, -1, &stmt, nullptr) == SQLITE_OK)
 	{
 		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_step(stmt);
+	}
+	sqlite3_finalize(stmt);
+
+	// 删除非今天的记录（确保每天开盘从零开始）
+	std::string today = GetTodayDateString();
+	const char* sql2 = "DELETE FROM avg_diff_stats WHERE update_time != ?;";
+	if (sqlite3_prepare_v2(m_db, sql2, -1, &stmt, nullptr) == SQLITE_OK)
+	{
+		sqlite3_bind_text(stmt, 1, today.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 	}
 	sqlite3_finalize(stmt);

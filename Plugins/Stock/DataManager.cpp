@@ -211,13 +211,16 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
 	LoadKLineCache(STOCK::Period::MIN30);
 	LoadFundNavCache();
 
-	// 从数据库加载关联股票的均幅统计
+	// 从数据库加载关联股票的均幅统计（只加载今天的记录）
 	for (const auto& item : m_stock_related)
 	{
 		auto stats = m_db_mgr.LoadAvgDiffStats(item.first);
 		if (stats.minVal != 0.0 || stats.maxVal != 0.0 || stats.currentVal != 0.0)
 			m_avg_diff_stats[item.first] = stats;
 	}
+
+	// 初始化日均幅日期，确保跨天检测生效
+	CheckAndResetAvgDiffDaily();
 }
 
 // ===== 以下数据库 CRUD 方法转发至 CStockDbManager =====

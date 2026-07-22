@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "FloatingWnd.h"
 #include <afxinet.h>
 #include <memory>
@@ -1358,18 +1358,7 @@ void CFloatingWnd::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContext&
 					int ptX = dataPoints[i].x;
 					int ptY = ctx.priceChartTop + ctx.priceChartHeight - dataPoints[i].y;
 
-					if (forbidSignals[i])
-					{
-						CPen pen(PS_SOLID, 2, COLOR_GRAY_TEXT);
-						CPen* pOldP = memDC.SelectObject(&pen);
-						int r = g_data.RDPI(4);
-						memDC.MoveTo(ptX - r, ptY - r);
-						memDC.LineTo(ptX + r, ptY + r);
-						memDC.MoveTo(ptX + r, ptY - r);
-						memDC.LineTo(ptX - r, ptY + r);
-						memDC.SelectObject(pOldP);
-					}
-					else if (buySignals[i])
+					if (buySignals[i])
 					{
 						CBrush brush(COLOR_GREEN_DOWN);
 						CPen pen(PS_SOLID, 1, COLOR_GREEN_DOWN);
@@ -10888,7 +10877,6 @@ LRESULT CFloatingWnd::OnShowAddDialog(WPARAM wParam, LPARAM lParam)
 	}
 	return 0;
 }
-
 
 LRESULT CFloatingWnd::OnShowTradeDialog(WPARAM wParam, LPARAM lParam)
 {
