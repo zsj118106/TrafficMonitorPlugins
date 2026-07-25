@@ -1,4 +1,4 @@
-﻿// ManagerDialog.cpp: 实现文件
+// ManagerDialog.cpp: 实现文件
 //
 
 #include "pch.h"
@@ -43,6 +43,7 @@ BEGIN_MESSAGE_MAP(CManagerDialog, CDialog)
 	ON_BN_CLICKED(IDC_SHOW_STOCK_NAME_CHECK, &CManagerDialog::OnBnClickedShowStockNameCheck)
 	ON_BN_CLICKED(IDC_COLOR_WITH_PRICE_CHECK, &CManagerDialog::OnBnClickedColorWithPriceCheck)
 	ON_BN_CLICKED(IDC_SHOW_FLUCTUATION_CHECK, &CManagerDialog::OnBnClickedShowFluctuationCheck)
+	ON_BN_CLICKED(IDC_USE_SOCKS5_PROXY_CHECK, &CManagerDialog::OnBnClickedUseSocks5ProxyCheck)
 END_MESSAGE_MAP()
 
 // CManagerDialog 消息处理程序
@@ -83,6 +84,8 @@ BOOL CManagerDialog::OnInitDialog()
 	CheckDlgButton(IDC_SHOW_STOCK_NAME_CHECK, m_data.m_show_stock_name);
 	CheckDlgButton(IDC_COLOR_WITH_PRICE_CHECK, m_data.m_color_with_price);
 	CheckDlgButton(IDC_SHOW_FLUCTUATION_CHECK, m_data.m_show_fluctuation);
+	CheckDlgButton(IDC_USE_SOCKS5_PROXY_CHECK, m_data.m_use_socks5_proxy);
+	SetDlgItemText(IDC_SOCKS5_PROXY_EDIT, m_data.m_socks5_proxy.c_str());
 
 	CString value;
 	value.Format(_T("%d"), static_cast<int>(g_data.m_setting_data.m_kline_width));
@@ -219,6 +222,11 @@ void CManagerDialog::OnBnClickedShowFluctuationCheck()
 	m_data.m_show_fluctuation = (IsDlgButtonChecked(IDC_SHOW_FLUCTUATION_CHECK) != 0);
 }
 
+void CManagerDialog::OnBnClickedUseSocks5ProxyCheck()
+{
+	m_data.m_use_socks5_proxy = (IsDlgButtonChecked(IDC_USE_SOCKS5_PROXY_CHECK) != 0);
+}
+
 void CManagerDialog::OnBnClickedOk()
 {
 	bool stock_code_changed{ g_data.m_setting_data.m_stock_codes != m_data.m_stock_codes };
@@ -227,6 +235,10 @@ void CManagerDialog::OnBnClickedOk()
 	m_data.m_kline_width = _ttoi(value);
 	GetDlgItemText(IDC_KLINE_HEIGHT_EDIT, value);
 	m_data.m_kline_height = _ttoi(value);
+
+	CString proxy_addr;
+	GetDlgItemText(IDC_SOCKS5_PROXY_EDIT, proxy_addr);
+	m_data.m_socks5_proxy = proxy_addr.GetString();
 
 	g_data.m_setting_data = m_data;
 	g_data.SaveConfig();

@@ -51,6 +51,12 @@
     <ClInclude Include="Common.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="NetFetch.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="LocalHttpProxy.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="OptionsDlg.h">
       <Filter>对话框</Filter>
     </ClInclude>
@@ -108,6 +114,12 @@
       <Filter>DataManager</Filter>
     </ClCompile>
     <ClCompile Include="Common.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="NetFetch.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="LocalHttpProxy.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="OptionsDlg.cpp">

@@ -30,6 +30,8 @@ struct SettingData
 	bool m_color_with_price{};          // 涨跌颜色标识
 	unsigned m_kline_width;             // 走势图宽度
 	unsigned m_kline_height;            // 走势图高度
+	bool m_use_socks5_proxy{};          // 是否启用 SOCKS5 代理
+	std::wstring m_socks5_proxy;        // SOCKS5 代理地址，如 127.0.0.1:1080
 };
 
 // Stock显示数据
@@ -79,7 +81,7 @@ public:
 	void RequestKLineData(std::wstring stock_id, int days = 250);
 	void RequestMin5KLineData(std::wstring stock_id, int datalen = 250);
 	void RequestMin30KLineData(std::wstring stock_id, int datalen = 250);
-	void RequestInnerOuterData();
+	void RequestInnerOuterData(bool includeAG = false);
 	void RequestFundIOPV(const std::wstring& stock_id);
 	void RequestCallAuctionData();
 	bool RequestChipDistributionData(std::wstring stock_id);
@@ -192,4 +194,8 @@ private:
 
 	// 每日重置跟踪：记录上次更新日期，跨天时自动清零
 	std::string m_avg_diff_last_date;
+
+	// 东方财富接口失败缓存：WAF 拦截 WinINet 后，一段时间内不再尝试
+	// 值为失败截止时间戳（秒），0 表示未缓存
+	time_t m_eastmoney_fail_until{ 0 };
 };

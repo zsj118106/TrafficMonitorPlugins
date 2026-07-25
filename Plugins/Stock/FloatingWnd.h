@@ -126,7 +126,11 @@ private:
 	void DrawTimelineKDJSection(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelineWRSection(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelineRSISection(CDC& memDC, const TimelineDrawContext& ctx);
-	void DrawTimelineTitleBars(CDC& memDC, const TimelineDrawContext& ctx, int priceChartTop, int volumeChartTop, int macdChartTop, int timelineTitleHeight);
+	// 封装的区域绘制函数：图表内容+标题栏一体化，接收独立的区域坐标参数
+	void DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight);
+	void DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight);
+	void DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, bool drawTimeLabels);
+	void DrawIndicatorChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, bool drawTimeLabels);
 	void DrawMACDChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::TimelinePoint>& timelinePoint, const std::vector<MACDData>& macdData, int startIndex = 0, int visibleCount = -1, int xAxisPoints = 0);
 	void DrawMACDChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::KLinePoint>& klineData, const std::vector<MACDData>& macdData, int startIndex = 0, int visibleCount = -1);
 	void DrawTimelinePositionInfo(CDC& memDC, const TimelineDrawContext& ctx);
@@ -253,7 +257,7 @@ private:
 
 	// 分时图指标类型
 	enum class TimelineIndicator { MACD, KDJ, WR, RSI };
-	TimelineIndicator m_timelineIndicator{ TimelineIndicator::MACD };
+	TimelineIndicator m_timelineIndicator{ TimelineIndicator::KDJ };
 	bool m_indicatorBtnsInitialized{ false };
 
 	// 分时图鼠标拖动滚动

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxdialogex.h"
 #include "DataManager.h"
 
@@ -45,4 +45,5 @@ public:
 	afx_msg void OnBnClickedShowStockNameCheck();
 	afx_msg void OnBnClickedColorWithPriceCheck();
 	afx_msg void OnBnClickedShowFluctuationCheck();
+	afx_msg void OnBnClickedUseSocks5ProxyCheck();
 };

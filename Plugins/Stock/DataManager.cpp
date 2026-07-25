@@ -165,6 +165,8 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
 	m_setting_data.m_color_with_price = ini.GetBool(L"config", L"color_with_price", true);
 	m_setting_data.m_kline_width = ini.GetInt(L"config", L"kline_width", 450);
 	m_setting_data.m_kline_height = ini.GetInt(L"config", L"kline_height", 210);
+	m_setting_data.m_use_socks5_proxy = ini.GetBool(L"config", L"use_socks5_proxy", false);
+	m_setting_data.m_socks5_proxy = ini.GetString(L"config", L"socks5_proxy", L"");
 
 	// 加载每个股票的关注价格
 	m_stock_alert_prices.clear();
@@ -459,6 +461,8 @@ void CDataManager::SaveConfig()
 		ini.WriteBool(L"config", L"color_with_price", m_setting_data.m_color_with_price);
 		ini.WriteInt(L"config", L"kline_width", m_setting_data.m_kline_width);
 		ini.WriteInt(L"config", L"kline_height", m_setting_data.m_kline_height);
+		ini.WriteBool(L"config", L"use_socks5_proxy", m_setting_data.m_use_socks5_proxy);
+		ini.WriteString(L"config", L"socks5_proxy", m_setting_data.m_socks5_proxy);
 
 		// 保存每个股票的关注价格到 CIniHelper 缓冲区
 		for (const auto& alert : m_stock_alert_prices)
@@ -1261,47 +1265,14 @@ void CDataManager::RequestRealtimeData()
 	TRACE(L"RequestRealtimeData...\n");
 	std::vector<std::wstring> codes = m_setting_data.m_stock_codes;
 
-	// 分离A股和非A股代码：A股用腾讯API（行情+内外盘+IOPV一次获取），非A股用新浪API
-	std::vector<std::wstring> agCodes;   // A股(SH/SZ/BJ)
-	std::vector<std::wstring> otherCodes; // 港股/美股/期货
-
-	for (const auto& code : codes)
-	{
-		if (code.find(kSH) == 0 || code.find(kSZ) == 0 || code.find(kBJ) == 0)
-			agCodes.push_back(code);
-		else
-			otherCodes.push_back(code);
-	}
-
-	// A股：腾讯API一次获取行情+内外盘+IOPV
-	if (!agCodes.empty())
-	{
-		std::vector<std::wstring> tencentCodes = agCodes;
-		// 腾讯API对港股使用 r_hk 前缀（A股不需要转换）
-		for (auto& code : tencentCodes)
-		{
-			if (code.find(kHK) == 0)
-				code = L"r_" + code.substr(2);
-		}
-
-		std::wstring url{ L"http://qt.gtimg.cn/q=" };
-		url += CCommon::vectorJoinString(tencentCodes, L",");
-		CString strHeaders = _T("Referer: https://finance.qq.com");
-
-		std::string stock_data;
-		if (CCommon::GetURL(url, stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-		{
-			stockMarket.LoadInnerOuterData(stock_data);
-		}
-	}
-
-	// 非A股：新浪API获取行情
-	if (!otherCodes.empty())
+	// 所有股票统一用新浪API获取基本行情（名称、价格、五档等）
+	// 腾讯API对部分代理IP会返回"访问被禁止"，因此不再依赖腾讯API作为A股主数据源
+	if (!codes.empty())
 	{
 		std::wstring url{ L"https://hq.sinajs.cn/?" };
 		std::vector<std::wstring> params;
 		params.push_back(L"_=" + std::to_wstring(generateRandomDouble()));
-		params.push_back(L"list=" + CCommon::vectorJoinString(otherCodes, L","));
+		params.push_back(L"list=" + CCommon::vectorJoinString(codes, L","));
 
 		url += CCommon::vectorJoinString(params, L"&");
 		CString strHeaders = _T("Referer: https://finance.sina.com.cn");
@@ -1309,22 +1280,24 @@ void CDataManager::RequestRealtimeData()
 		std::string Stock_data;
 		if (CCommon::GetURL(url, Stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
 		{
-			stockMarket.LoadRealtimeDataByJson(Stock_data, otherCodes);
+			stockMarket.LoadRealtimeDataByJson(Stock_data, codes);
 		}
-
-		// 非A股的内外盘数据仍需腾讯API
-		RequestInnerOuterData();
 	}
+
+	// 尝试用腾讯API获取内外盘+IOPV等扩展数据（失败不影响基本行情）
+	// 腾讯API对代理IP可能返回"访问被禁止"，此时内外盘数据无法获取
+	RequestInnerOuterData(true);
 }
 
-void CDataManager::RequestInnerOuterData()
+void CDataManager::RequestInnerOuterData(bool includeAG)
 {
-	TRACE(L"RequestInnerOuterData... 使用腾讯API获取非A股内外盘\n");
+	TRACE(L"RequestInnerOuterData... 使用腾讯API获取内外盘 (includeAG=%d)\n", includeAG ? 1 : 0);
 	std::vector<std::wstring> codes;
-	// 仅非A股需要单独获取内外盘（A股已在RequestRealtimeData中通过腾讯API一次获取）
 	for (const auto& code : m_setting_data.m_stock_codes)
 	{
-		if (code.find(kSH) != 0 && code.find(kSZ) != 0 && code.find(kBJ) != 0)
+		bool isAG = (code.find(kSH) == 0 || code.find(kSZ) == 0 || code.find(kBJ) == 0);
+		// includeAG=true 时获取所有股票的内外盘；否则仅非A股
+		if (includeAG || !isAG)
 			codes.push_back(code);
 	}
 	if (codes.empty()) return;
@@ -1469,54 +1442,91 @@ void CDataManager::RequestAllStockBasicData()
 
 bool CDataManager::RequestStockBasicData(std::wstring stock_id)
 {
+	// 优先用东方财富接口（有网络的用户可用）
+	// 失败缓存检查：WAF 拦截后 10 分钟内不再尝试
 	std::wstring secId = GetEastMoneySecId(stock_id);
-	if (secId.empty()) return false;
-
-	try
+	bool skip_eastmoney = (m_eastmoney_fail_until > 0 && time(nullptr) < m_eastmoney_fail_until);
+	if (!secId.empty() && !skip_eastmoney)
 	{
-		TRACE(L"RequestStockBasicData...\n");
-		std::wstring url{ L"https://push2.eastmoney.com/api/qt/stock/get?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"secid=" + secId);
-		params.push_back(L"fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f57,f58,f60,f85,f116,f117");
-		url += CCommon::vectorJoinString(params, L"&");
-
-		CString strHeaders = _T("Referer: https://quote.eastmoney.com");
-		std::string response;
-		if (!CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength()) || response.empty())
-			return false;
-
-		yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
-		if (doc == nullptr) return false;
-
-		STOCK::Volume circulatingAShares = 0;
-		yyjson_val* root = yyjson_doc_get_root(doc);
-		yyjson_val* data = root ? yyjson_obj_get(root, "data") : nullptr;
-		if (data != nullptr)
+		try
 		{
-			circulatingAShares = static_cast<STOCK::Volume>(GetJsonDoubleValue(yyjson_obj_get(data, "f85")));
+			TRACE(L"RequestStockBasicData...\n");
+			std::wstring url{ L"https://push2.eastmoney.com/api/qt/stock/get?" };
+			std::vector<std::wstring> params;
+			params.push_back(L"secid=" + secId);
+			params.push_back(L"fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f57,f58,f60,f85,f116,f117");
+			url += CCommon::vectorJoinString(params, L"&");
+
+			CString strHeaders = _T("Referer: https://quote.eastmoney.com");
+			std::string response;
+			bool fetch_ok = CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength());
+			if (!fetch_ok)
+			{
+				// 东方财富请求失败：缓存失败状态 10 分钟，避免反复尝试
+				m_eastmoney_fail_until = time(nullptr) + 600;
+			}
+			else if (!response.empty())
+			{
+				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
+				if (doc != nullptr)
+				{
+					STOCK::Volume circulatingAShares = 0;
+					yyjson_val* root = yyjson_doc_get_root(doc);
+					yyjson_val* data = root ? yyjson_obj_get(root, "data") : nullptr;
+					if (data != nullptr)
+					{
+						circulatingAShares = static_cast<STOCK::Volume>(GetJsonDoubleValue(yyjson_obj_get(data, "f85")));
+					}
+					yyjson_doc_free(doc);
+
+					if (circulatingAShares > 0)
+					{
+						std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+						auto stockData = GetStockData(stock_id);
+						if (stockData)
+						{
+							stockData->info.circulatingAShares = circulatingAShares;
+							SaveStockBasicData(stock_id, circulatingAShares);
+							return true;
+						}
+					}
+				}
+			}
 		}
-		yyjson_doc_free(doc);
-
-		if (circulatingAShares <= 0)
-			return false;
-
+		catch (CInternetException* e)
 		{
-			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-			auto stockData = GetStockData(stock_id);
-			if (!stockData) return false;
+			e->Delete();
+			// 异常也视为失败：缓存失败状态
+			m_eastmoney_fail_until = time(nullptr) + 600;
+		}
+		catch (...)
+		{
+			m_eastmoney_fail_until = time(nullptr) + 600;
+		}
+	}
+
+	// 东方财富失败：检查腾讯接口是否已设置流通股本（LoadInnerOuterData 中解析）
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(stock_id);
+		if (stockData && stockData->info.circulatingAShares > 0)
+		{
+			SaveStockBasicData(stock_id, stockData->info.circulatingAShares);
+			return true;
+		}
+	}
+
+	// 用数据库缓存
+	STOCK::Volume circulatingAShares = 0;
+	if (m_db_mgr.LoadStockBasicData(stock_id, circulatingAShares) && circulatingAShares > 0)
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(stock_id);
+		if (stockData)
 			stockData->info.circulatingAShares = circulatingAShares;
-		}
-		SaveStockBasicData(stock_id, circulatingAShares);
 		return true;
 	}
-	catch (CInternetException* e)
-	{
-		e->Delete();
-	}
-	catch (...)
-	{
-	}
+
 	return false;
 }
 
@@ -1530,9 +1540,6 @@ void CDataManager::RequestAllChipDistributionData()
 
 bool CDataManager::RequestChipDistributionData(std::wstring stock_id)
 {
-	std::wstring secId = GetEastMoneySecId(stock_id);
-	if (secId.empty()) return false;
-
 	STOCK::ChipDistribution cachedData;
 	if (LoadLatestChipDistribution(stock_id, cachedData) && IsSameLocalDate(cachedData.updatedAt, time(nullptr)))
 	{
@@ -1545,364 +1552,382 @@ bool CDataManager::RequestChipDistributionData(std::wstring stock_id)
 		}
 	}
 
-	try
+	std::vector<ChipKLinePoint> klines;
+
+	// 优先用东方财富接口（有网络的用户可用，含换手率字段）
+	// 失败缓存检查：WAF 拦截后 10 分钟内不再尝试
+	std::wstring secId = GetEastMoneySecId(stock_id);
+	bool skip_eastmoney = (m_eastmoney_fail_until > 0 && time(nullptr) < m_eastmoney_fail_until);
+	if (!secId.empty() && !skip_eastmoney)
 	{
-		TRACE(L"RequestChipDistributionData...\n");
-		std::wstring url{ L"https://push2his.eastmoney.com/api/qt/stock/kline/get?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"secid=" + secId);
-		params.push_back(L"fields1=f1,f2,f3,f4,f5,f6");
-		params.push_back(L"fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61");
-		params.push_back(L"klt=101");
-		params.push_back(L"fqt=0");
-		SYSTEMTIME st;
-		GetLocalTime(&st);
-		wchar_t dateBuf[16];
-		swprintf_s(dateBuf, L"%04d%02d%02d", st.wYear, st.wMonth, st.wDay);
-		params.push_back(L"end=" + std::wstring(dateBuf));
-		params.push_back(L"lmt=750");
-		url += CCommon::vectorJoinString(params, L"&");
-
-		CString strHeaders = _T("Referer: https://quote.eastmoney.com");
-		std::string response;
-		if (!CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength()) || response.empty())
-			return false;
-
-		yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
-		if (doc == nullptr) return false;
-
-		std::vector<ChipKLinePoint> klines;
-		yyjson_val* root = yyjson_doc_get_root(doc);
-		yyjson_val* data = yyjson_obj_get(root, "data");
-		yyjson_val* klineArr = data ? yyjson_obj_get(data, "klines") : nullptr;
-		if (klineArr != nullptr && yyjson_is_arr(klineArr))
+		try
 		{
-			yyjson_val* item;
-			yyjson_arr_iter iter;
-			yyjson_arr_iter_init(klineArr, &iter);
-			while ((item = yyjson_arr_iter_next(&iter)))
+			TRACE(L"RequestChipDistributionData (EastMoney)...\n");
+			std::wstring url{ L"https://push2his.eastmoney.com/api/qt/stock/kline/get?" };
+			std::vector<std::wstring> params;
+			params.push_back(L"secid=" + secId);
+			params.push_back(L"fields1=f1,f2,f3,f4,f5,f6");
+			params.push_back(L"fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61");
+			params.push_back(L"klt=101");
+			params.push_back(L"fqt=0");
+			SYSTEMTIME st;
+			GetLocalTime(&st);
+			wchar_t dateBuf[16];
+			swprintf_s(dateBuf, L"%04d%02d%02d", st.wYear, st.wMonth, st.wDay);
+			params.push_back(L"end=" + std::wstring(dateBuf));
+			params.push_back(L"lmt=750");
+			url += CCommon::vectorJoinString(params, L"&");
+
+			CString strHeaders = _T("Referer: https://quote.eastmoney.com");
+			std::string response;
+			bool fetch_ok = CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength());
+			if (!fetch_ok)
 			{
-				const char* line = yyjson_get_str(item);
-				if (line == nullptr) continue;
-				std::vector<std::string> values = CCommon::split(line, ',');
-				if (values.size() < 11) continue;
+				// 东方财富请求失败：缓存失败状态 10 分钟
+				m_eastmoney_fail_until = time(nullptr) + 600;
+			}
+			else if (!response.empty())
+			{
+				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
+				if (doc != nullptr)
+				{
+					yyjson_val* root = yyjson_doc_get_root(doc);
+					yyjson_val* data = yyjson_obj_get(root, "data");
+					yyjson_val* klineArr = data ? yyjson_obj_get(data, "klines") : nullptr;
+					if (klineArr != nullptr && yyjson_is_arr(klineArr))
+					{
+						yyjson_val* item;
+						yyjson_arr_iter iter;
+						yyjson_arr_iter_init(klineArr, &iter);
+						while ((item = yyjson_arr_iter_next(&iter)))
+						{
+							const char* line = yyjson_get_str(item);
+							if (line == nullptr) continue;
+							std::vector<std::string> values = CCommon::split(line, ',');
+							if (values.size() < 11) continue;
 
-				double open = 0.0, close = 0.0, high = 0.0, low = 0.0, volumeHands = 0.0, turnoverRate = 0.0;
-				if (!TryParseDouble(values[1], open) || !TryParseDouble(values[2], close) || !TryParseDouble(values[3], high) || !TryParseDouble(values[4], low))
-					continue;
-				TryParseDouble(values[5], volumeHands);
-				TryParseDouble(values[10], turnoverRate);
-				if (high <= 0.0 || low <= 0.0 || volumeHands <= 0.0)
-					continue;
+							double open = 0.0, close = 0.0, high = 0.0, low = 0.0, volumeHands = 0.0, turnoverRate = 0.0;
+							if (!TryParseDouble(values[1], open) || !TryParseDouble(values[2], close) || !TryParseDouble(values[3], high) || !TryParseDouble(values[4], low))
+								continue;
+							TryParseDouble(values[5], volumeHands);
+							TryParseDouble(values[10], turnoverRate);
+							if (high <= 0.0 || low <= 0.0 || volumeHands <= 0.0)
+								continue;
 
-				ChipKLinePoint point;
-				point.date = values[0];
-				point.open = open;
-				point.close = close;
-				point.high = high;
-				point.low = low;
-				point.turnoverRate = turnoverRate;
-				point.volume = static_cast<STOCK::Volume>(volumeHands * 100.0);
-				klines.push_back(point);
+							ChipKLinePoint point;
+							point.date = values[0];
+							point.open = open;
+							point.close = close;
+							point.high = high;
+							point.low = low;
+							point.turnoverRate = turnoverRate;
+							point.volume = static_cast<STOCK::Volume>(volumeHands * 100.0);
+							klines.push_back(point);
+						}
+					}
+					yyjson_doc_free(doc);
+				}
 			}
 		}
-		yyjson_doc_free(doc);
-
-		if (klines.empty())
-			return false;
-
-		bool isFund = false;
-		STOCK::Volume totalShares = 0;
+		catch (CInternetException* e)
 		{
+			e->Delete();
+			m_eastmoney_fail_until = time(nullptr) + 600;
+		}
+		catch (...)
+		{
+			m_eastmoney_fail_until = time(nullptr) + 600;
+		}
+	}
+
+	// 东方财富失败（WAF 拦截等）：用新浪日K线接口，换手率自己算
+	if (klines.empty())
+	{
+		try
+		{
+			TRACE(L"RequestChipDistributionData (Sina fallback)...\n");
+			std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
+			std::vector<std::wstring> params;
+			params.push_back(L"symbol=" + stock_id);
+			params.push_back(L"scale=240");
+			params.push_back(L"ma=no");
+			params.push_back(L"datalen=750");
+			url += CCommon::vectorJoinString(params, L"&");
+
+			CString strHeaders = _T("Referer: http://finance.sina.com.cn");
+			std::string response;
+			if (CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength()) && !response.empty())
+			{
+				// 获取流通股本（用于计算换手率：换手率 = 成交量 / 流通股本 * 100%）
+				STOCK::Volume circulatingAShares = 0;
+				{
+					std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+					auto stockData = GetStockData(stock_id);
+					if (stockData)
+						circulatingAShares = stockData->info.circulatingAShares;
+				}
+				if (circulatingAShares <= 0)
+				{
+					RequestStockBasicData(stock_id);
+					std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+					auto stockData = GetStockData(stock_id);
+					if (stockData)
+						circulatingAShares = stockData->info.circulatingAShares;
+				}
+
+				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
+				if (doc != nullptr)
+				{
+					yyjson_val* root = yyjson_doc_get_root(doc);
+					if (root != nullptr && yyjson_is_arr(root))
+					{
+						auto getDouble = [](yyjson_val* obj, const char* key) -> double {
+							yyjson_val* val = yyjson_obj_get(obj, key);
+							if (val == nullptr) return 0.0;
+							if (yyjson_is_real(val)) return yyjson_get_real(val);
+							if (yyjson_is_int(val)) return static_cast<double>(yyjson_get_int(val));
+							if (yyjson_is_str(val)) return atof(yyjson_get_str(val));
+							return 0.0;
+						};
+
+						yyjson_val* item;
+						yyjson_arr_iter iter;
+						yyjson_arr_iter_init(root, &iter);
+						while ((item = yyjson_arr_iter_next(&iter)))
+						{
+							if (item == nullptr || !yyjson_is_obj(item))
+								continue;
+
+							ChipKLinePoint point;
+							point.date = utilities::JsonHelper::GetJsonString(item, "day");
+							point.open = getDouble(item, "open");
+							point.high = getDouble(item, "high");
+							point.low = getDouble(item, "low");
+							point.close = getDouble(item, "close");
+							point.volume = static_cast<STOCK::Volume>(getDouble(item, "volume"));
+
+							// 换手率 = 成交量(股) / 流通股本(股) * 100%
+							if (circulatingAShares > 0 && point.volume > 0)
+								point.turnoverRate = static_cast<double>(point.volume) / circulatingAShares * 100.0;
+
+							if (point.high > 0 && point.low > 0 && point.volume > 0)
+								klines.push_back(point);
+						}
+					}
+					yyjson_doc_free(doc);
+				}
+			}
+		}
+		catch (CInternetException* e)
+		{
+			e->Delete();
+		}
+		catch (...)
+		{
+		}
+	}
+
+	if (klines.empty())
+		return false;
+
+	// 计算筹码分布
+	bool isFund = false;
+	STOCK::Volume totalShares = 0;
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(stock_id);
+		if (stockData)
+		{
+			isFund = CCommon::IsFundCode(stock_id);
+			totalShares = stockData->info.circulatingAShares;
+		}
+	}
+
+	STOCK::ChipDistribution chipData;
+	if (isFund)
+	{
+		if (totalShares <= 0)
+		{
+			RequestStockBasicData(stock_id);
 			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
 			auto stockData = GetStockData(stock_id);
 			if (stockData)
-			{
-				isFund = CCommon::IsFundCode(stock_id);
 				totalShares = stockData->info.circulatingAShares;
-			}
 		}
-
-		STOCK::ChipDistribution chipData;
-		if (isFund)
-		{
-			if (totalShares <= 0)
-			{
-				RequestStockBasicData(stock_id);
-				std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-				auto stockData = GetStockData(stock_id);
-				if (stockData)
-					totalShares = stockData->info.circulatingAShares;
-			}
-			if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
-				return false;
-		}
-		else if (!CalculateChipDistribution(klines, chipData))
-		{
-			if (totalShares <= 0)
-			{
-				RequestStockBasicData(stock_id);
-				std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-				auto stockData = GetStockData(stock_id);
-				if (stockData)
-					totalShares = stockData->info.circulatingAShares;
-			}
-			if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
-				return false;
-		}
-
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		auto stockData = GetStockData(stock_id);
-		if (!stockData) return false;
-		stockData->chipDistribution = chipData;
-		SaveChipDistribution(stock_id, chipData);
-		return true;
+		if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
+			return false;
 	}
-	catch (CInternetException* e)
+	else if (!CalculateChipDistribution(klines, chipData))
 	{
-		e->Delete();
+		if (totalShares <= 0)
+		{
+			RequestStockBasicData(stock_id);
+			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+			auto stockData = GetStockData(stock_id);
+			if (stockData)
+				totalShares = stockData->info.circulatingAShares;
+		}
+		if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
+			return false;
 	}
-	catch (...)
-	{
-	}
-	return false;
+
+	std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+	auto stockData = GetStockData(stock_id);
+	if (!stockData) return false;
+	stockData->chipDistribution = chipData;
+	SaveChipDistribution(stock_id, chipData);
+	return true;
 }
 
 void CDataManager::RequestTimelineData(std::wstring stock_id)
 {
-	try
+	TRACE(L"RequestTimelineData...\n");
+
+	std::wstring url{ L"https://cn.finance.sina.com.cn/minline/getMinlineData?" };
+	// https://cn.finance.sina.com.cn/minline/getMinlineData?symbol=sz000100&version=7.11.0&dpc=1
+	std::vector<std::wstring> params;
+	params.push_back(L"symbol=" + stock_id);
+	params.push_back(L"version=7.11.0");
+	params.push_back(L"dpc=1");
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	wchar_t dateBuf[20];
+	swprintf_s(dateBuf, L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+	params.push_back(L"date=" + std::wstring(dateBuf));
+
+	url += CCommon::vectorJoinString(params, L"&");
+
+	std::wstring strHeaders{ L"Referer: https://finance.sina.com.cn/realstock/company/" };
+	strHeaders += stock_id;
+	strHeaders += L"/nc.shtml";
+	CString headers = strHeaders.c_str();
+
+	std::string response;
+	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, headers, headers.GetLength()))
 	{
-		TRACE(L"RequestTimelineData...\n");
+		CString strData(response.c_str());
 
-		std::wstring url{ L"https://cn.finance.sina.com.cn/minline/getMinlineData?" };
-		// https://cn.finance.sina.com.cn/minline/getMinlineData?symbol=sz000100&version=7.11.0&dpc=1
-		std::vector<std::wstring> params;
-		params.push_back(L"symbol=" + stock_id);
-		params.push_back(L"version=7.11.0");
-		params.push_back(L"dpc=1");
-
-		SYSTEMTIME st;
-		GetLocalTime(&st);
-		wchar_t dateBuf[20];
-		swprintf_s(dateBuf, L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
-		params.push_back(L"date=" + std::wstring(dateBuf));
-
-		url += CCommon::vectorJoinString(params, L"&");
-		// CCommon::WriteLog(url.c_str(), g_data.m_log_path.c_str());
-
-		// CString strHeaders = L"Referer: https://finance.sina.com.cn/realstock/company/" + m_stock_id + L"/nc.shtml";
-		std::wstring strHeaders{ L"Referer: https://finance.sina.com.cn/realstock/company/" };
-		strHeaders += stock_id;
-		strHeaders += L"/nc.shtml";
-		CString headers = strHeaders.c_str();
-
-		CInternetSession* session = new CInternetSession(WEB_USERAGENT);
-		CHttpFile* pFile = (CHttpFile*)session->OpenURL(url.c_str(), 1, INTERNET_FLAG_TRANSFER_ASCII, headers, headers.GetLength());
-
-		DWORD dwStatusCode;
-		pFile->QueryInfoStatusCode(dwStatusCode);
-
-		if (dwStatusCode == HTTP_STATUS_OK)
+		stockMarket.LoadTimelineDataByJson(stock_id, &strData);
+		auto stockData = GetStockData(stock_id);
+		auto timelineData = stockData ? stockData->getTimelineData() : nullptr;
+		if (timelineData && !timelineData->data.empty())
 		{
-			CString strData;
-			char szBuffer[1025];
-			int nRead;
-			while ((nRead = pFile->Read(szBuffer, 1024)) > 0)
+			SaveTimelineCache(stock_id, timelineData->data);
+			// 分时数据加载后，合并基金净值缓存到iopv字段
+			if (CCommon::IsFundCode(stock_id))
 			{
-				szBuffer[nRead] = 0;
-				strData += CString(szBuffer);
-			}
-
-			stockMarket.LoadTimelineDataByJson(stock_id, &strData);
-			auto stockData = GetStockData(stock_id);
-			auto timelineData = stockData ? stockData->getTimelineData() : nullptr;
-			if (timelineData && !timelineData->data.empty())
-			{
-				SaveTimelineCache(stock_id, timelineData->data);
-				// 分时数据加载后，合并基金净值缓存到iopv字段
-				if (CCommon::IsFundCode(stock_id))
+				auto navPoints = m_db_mgr.LoadLatestFundNavCache(stock_id);
+				if (!navPoints.empty())
 				{
-					auto navPoints = m_db_mgr.LoadLatestFundNavCache(stock_id);
-					if (!navPoints.empty())
+					size_t navIdx = 0;
+					for (auto& tp : timelineData->data)
 					{
-						size_t navIdx = 0;
-						for (auto& tp : timelineData->data)
+						if (navIdx < navPoints.size() && tp.time.find(navPoints[navIdx].time) == 0)
 						{
-							if (navIdx < navPoints.size() && tp.time.find(navPoints[navIdx].time) == 0)
-							{
-								tp.iopv = navPoints[navIdx].iopv;
-								navIdx++;
-							}
+							tp.iopv = navPoints[navIdx].iopv;
+							navIdx++;
 						}
 					}
 				}
 			}
 		}
-
-		// 清理资源
-		pFile->Close();
-		delete pFile;
-		session->Close();
 	}
-	catch (CInternetException* e)
+	else
 	{
-		e->Delete();
 		stockMarket.LoadTimelineDataByJson(stock_id, NULL);
 	}
 }
 
 void CDataManager::RequestKLineData(std::wstring stock_id, int days /*= 750*/)
 {
-	try
+	TRACE(L"RequestKLineData...\n");
+
+	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
+	std::vector<std::wstring> params;
+	params.push_back(L"symbol=" + stock_id);
+	params.push_back(L"scale=240");
+	params.push_back(L"ma=no");
+	params.push_back(L"datalen=" + std::to_wstring(days));
+
+	url += CCommon::vectorJoinString(params, L"&");
+
+	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
+
+	std::string response;
+	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
 	{
-		TRACE(L"RequestKLineData...\n");
-
-		std::wstring url{ L"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"symbol=" + stock_id);
-		params.push_back(L"scale=240");
-		params.push_back(L"ma=no");
-		params.push_back(L"datalen=" + std::to_wstring(days));
-
-		url += CCommon::vectorJoinString(params, L"&");
-
-		CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-		CInternetSession* session = new CInternetSession(WEB_USERAGENT);
-		CHttpFile* pFile = (CHttpFile*)session->OpenURL(url.c_str(), 1, INTERNET_FLAG_TRANSFER_ASCII, strHeaders, strHeaders.GetLength());
-
-		DWORD dwStatusCode;
-		pFile->QueryInfoStatusCode(dwStatusCode);
-
-		if (dwStatusCode == HTTP_STATUS_OK)
-		{
-			CString strData;
-			char szBuffer[1025];
-			int nRead;
-			while ((nRead = pFile->Read(szBuffer, 1024)) > 0)
-			{
-				szBuffer[nRead] = 0;
-				strData += CString(szBuffer);
-			}
-
-			stockMarket.LoadKLineDataByJson(stock_id, &strData);
-			auto stockData = GetStockData(stock_id);
-			auto klineData = stockData ? stockData->getKLineData() : nullptr;
-			if (klineData && !klineData->data.empty())
-				SaveKLineCache(stock_id, STOCK::Period::DAY, klineData->data);
-		}
-
-		pFile->Close();
-		delete pFile;
-		session->Close();
+		CString strData(response.c_str());
+		stockMarket.LoadKLineDataByJson(stock_id, &strData);
+		auto stockData = GetStockData(stock_id);
+		auto klineData = stockData ? stockData->getKLineData() : nullptr;
+		if (klineData && !klineData->data.empty())
+			SaveKLineCache(stock_id, STOCK::Period::DAY, klineData->data);
 	}
-	catch (CInternetException* e)
+	else
 	{
-		e->Delete();
 		stockMarket.LoadKLineDataByJson(stock_id, NULL);
 	}
 }
 
 void CDataManager::RequestMin5KLineData(std::wstring stock_id, int datalen /*= 250*/)
 {
-	try
+	TRACE(L"RequestMin5KLineData...\n");
+
+	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
+	std::vector<std::wstring> params;
+	params.push_back(L"symbol=" + stock_id);
+	params.push_back(L"scale=5");
+	params.push_back(L"ma=no");
+	params.push_back(L"datalen=" + std::to_wstring(datalen));
+
+	url += CCommon::vectorJoinString(params, L"&");
+
+	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
+
+	std::string response;
+	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
 	{
-		TRACE(L"RequestMin5KLineData...\n");
-
-		std::wstring url{ L"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"symbol=" + stock_id);
-		params.push_back(L"scale=5");
-		params.push_back(L"ma=no");
-		params.push_back(L"datalen=" + std::to_wstring(datalen));
-
-		url += CCommon::vectorJoinString(params, L"&");
-
-		CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-		CInternetSession* session = new CInternetSession(WEB_USERAGENT);
-		CHttpFile* pFile = (CHttpFile*)session->OpenURL(url.c_str(), 1, INTERNET_FLAG_TRANSFER_ASCII, strHeaders, strHeaders.GetLength());
-
-		DWORD dwStatusCode;
-		pFile->QueryInfoStatusCode(dwStatusCode);
-
-		if (dwStatusCode == HTTP_STATUS_OK)
-		{
-			CString strData;
-			char szBuffer[1025];
-			int nRead;
-			while ((nRead = pFile->Read(szBuffer, 1024)) > 0)
-			{
-				szBuffer[nRead] = 0;
-				strData += CString(szBuffer);
-			}
-
-			stockMarket.LoadMin5KLineDataByJson(stock_id, &strData);
-			auto stockData = GetStockData(stock_id);
-			auto klineData = stockData ? stockData->getMin5KLineData() : nullptr;
-			if (klineData && !klineData->data.empty())
-				SaveKLineCache(stock_id, STOCK::Period::MIN5, klineData->data);
-		}
-
-		pFile->Close();
-		delete pFile;
-		session->Close();
+		CString strData(response.c_str());
+		stockMarket.LoadMin5KLineDataByJson(stock_id, &strData);
+		auto stockData = GetStockData(stock_id);
+		auto klineData = stockData ? stockData->getMin5KLineData() : nullptr;
+		if (klineData && !klineData->data.empty())
+			SaveKLineCache(stock_id, STOCK::Period::MIN5, klineData->data);
 	}
-	catch (CInternetException* e)
+	else
 	{
-		e->Delete();
 		stockMarket.LoadMin5KLineDataByJson(stock_id, NULL);
 	}
 }
 
 void CDataManager::RequestMin30KLineData(std::wstring stock_id, int datalen /*= 250*/)
 {
-	try
+	TRACE(L"RequestMin30KLineData...\n");
+
+	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
+	std::vector<std::wstring> params;
+	params.push_back(L"symbol=" + stock_id);
+	params.push_back(L"scale=30");
+	params.push_back(L"ma=no");
+	params.push_back(L"datalen=" + std::to_wstring(datalen));
+
+	url += CCommon::vectorJoinString(params, L"&");
+
+	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
+
+	std::string response;
+	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
 	{
-		TRACE(L"RequestMin30KLineData...\n");
-
-		std::wstring url{ L"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"symbol=" + stock_id);
-		params.push_back(L"scale=30");
-		params.push_back(L"ma=no");
-		params.push_back(L"datalen=" + std::to_wstring(datalen));
-
-		url += CCommon::vectorJoinString(params, L"&");
-
-		CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-		CInternetSession* session = new CInternetSession(WEB_USERAGENT);
-		CHttpFile* pFile = (CHttpFile*)session->OpenURL(url.c_str(), 1, INTERNET_FLAG_TRANSFER_ASCII, strHeaders, strHeaders.GetLength());
-
-		DWORD dwStatusCode;
-		pFile->QueryInfoStatusCode(dwStatusCode);
-
-		if (dwStatusCode == HTTP_STATUS_OK)
-		{
-			CString strData;
-			char szBuffer[1025];
-			int nRead;
-			while ((nRead = pFile->Read(szBuffer, 1024)) > 0)
-			{
-				szBuffer[nRead] = 0;
-				strData += CString(szBuffer);
-			}
-
-			stockMarket.LoadMin30KLineDataByJson(stock_id, &strData);
-			auto stockData = GetStockData(stock_id);
-			auto klineData = stockData ? stockData->getMin30KLineData() : nullptr;
-			if (klineData && !klineData->data.empty())
-				SaveKLineCache(stock_id, STOCK::Period::MIN30, klineData->data);
-		}
-
-		pFile->Close();
-		delete pFile;
-		session->Close();
+		CString strData(response.c_str());
+		stockMarket.LoadMin30KLineDataByJson(stock_id, &strData);
+		auto stockData = GetStockData(stock_id);
+		auto klineData = stockData ? stockData->getMin30KLineData() : nullptr;
+		if (klineData && !klineData->data.empty())
+			SaveKLineCache(stock_id, STOCK::Period::MIN30, klineData->data);
 	}
-	catch (CInternetException* e)
+	else
 	{
-		e->Delete();
 		stockMarket.LoadMin30KLineDataByJson(stock_id, NULL);
 	}
 }

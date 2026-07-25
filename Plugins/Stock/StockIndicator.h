@@ -104,6 +104,9 @@ public:
 	// 获取最近一次MACD金叉死叉信号
 	static MACDCrossSignal GetLatestMACDCross(const std::vector<MACDData>& macdData);
 
+	// 检测KDJ金叉死叉序列（金叉：K上穿D且前一根K<=30，死叉：K下穿D且前一根K>=70）
+	static std::vector<MACDCrossSignal> DetectKDJCross(const std::vector<KDJData>& kdjData);
+
 	// ========== T+0日内买卖点判定 ==========
 
 	// 检测买点信号（基于分时数据+MACD）

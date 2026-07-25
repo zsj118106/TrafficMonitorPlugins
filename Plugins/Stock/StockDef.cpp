@@ -226,6 +226,17 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 				stockData->callAuctionData.limitDownPrice = { convert<Price>(data_arr[48]) };
 			}
 
+			// 流通股本：索引44为流通市值（亿元），流通股本(股) = 流通市值 / 现价 * 1e8
+			// 东方财富接口被 WAF 拦截时，用腾讯接口的流通市值作为替代
+			if (data_arr.size() > 44 && !data_arr[44].empty() && info.currentPrice > 0)
+			{
+				double flowMarketValue = atof(data_arr[44].c_str());
+				if (flowMarketValue > 0)
+				{
+					info.circulatingAShares = static_cast<STOCK::Volume>(flowMarketValue / info.currentPrice * 100000000.0);
+				}
+			}
+
 			// 计算涨跌显示
 			if (info.currentPrice > 0 && info.prevClosePrice > 0)
 			{

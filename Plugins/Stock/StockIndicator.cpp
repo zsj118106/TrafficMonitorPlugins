@@ -257,8 +257,8 @@ std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectMACDCross(c
 		double difNow = macdData[i].dif;
 		double deaNow = macdData[i].dea;
 
-		// 粘合状态：当前DIF与DEA差值过小，不触发新叉
-		if (std::abs(difNow - deaNow) < epsilon)
+		// 粘合状态：前一根DIF与DEA差值过小，不触发新叉
+		if (std::abs(difPrev - deaPrev) < epsilon)
 			continue;
 
 		// 金叉：上一时刻DIF < DEA，当前时刻DIF > DEA
@@ -293,6 +293,53 @@ CStockIndicator::MACDCrossSignal CStockIndicator::GetLatestMACDCross(const std::
 			return signals[i];
 	}
 	return MACDCrossSignal::None;
+}
+
+std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectKDJCross(const std::vector<KDJData>& kdjData)
+{
+	std::vector<MACDCrossSignal> signals(kdjData.size(), MACDCrossSignal::None);
+	if (kdjData.size() < 2)
+		return signals;
+
+	const double epsilon = 1e-6;
+	const int MIN_CROSS_GAP = 10;
+	int lastCrossIdx = -MIN_CROSS_GAP;
+
+	for (size_t i = 1; i < kdjData.size(); i++)
+	{
+		if (!kdjData[i].valid || !kdjData[i - 1].valid)
+			continue;
+
+		double kPrev = kdjData[i - 1].k;
+		double dPrev = kdjData[i - 1].d;
+		double kNow = kdjData[i].k;
+		double dNow = kdjData[i].d;
+
+		// 粘合状态：前一根K与D差值过小，不触发新叉
+		if (std::abs(kPrev - dPrev) < epsilon)
+			continue;
+
+		// 金叉：K上穿D，且前一根K值<=30
+		if (kPrev < dPrev && kNow > dNow && kPrev <= 30.0)
+		{
+			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			{
+				signals[i] = MACDCrossSignal::GoldenCross;
+				lastCrossIdx = static_cast<int>(i);
+			}
+		}
+		// 死叉：K下穿D，且前一根K值>=70
+		else if (kPrev > dPrev && kNow < dNow && kPrev >= 70.0)
+		{
+			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			{
+				signals[i] = MACDCrossSignal::DeathCross;
+				lastCrossIdx = static_cast<int>(i);
+			}
+		}
+	}
+
+	return signals;
 }
 
 // ========== T+0日内买卖点判定 ==========

@@ -263,7 +263,9 @@
     <ClInclude Include="SmartSignalTestDlg.h" />
     <ClInclude Include="StockFetchThread.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="LocalHttpProxy.h" />
     <ClInclude Include="ManagerDialog.h" />
+    <ClInclude Include="NetFetch.h" />
     <ClInclude Include="OptionsDlg.h" />
     <ClInclude Include="RelateStockDlg.h" />
     <ClInclude Include="pch.h" />
@@ -280,11 +282,13 @@
     <ClCompile Include="Common.cpp" />
     <ClCompile Include="DataManager.cpp" />
     <ClCompile Include="FloatingWnd.cpp" />
+    <ClCompile Include="LocalHttpProxy.cpp" />
     <ClCompile Include="SignalAnalyzer.cpp" />
     <ClCompile Include="StockIndicator.cpp" />
     <ClCompile Include="SmartSignalTestDlg.cpp" />
     <ClCompile Include="StockFetchThread.cpp" />
     <ClCompile Include="ManagerDialog.cpp" />
+    <ClCompile Include="NetFetch.cpp" />
     <ClCompile Include="OptionsDlg.cpp" />
     <ClCompile Include="RelateStockDlg.cpp" />
     <ClCompile Include="pch.cpp">

@@ -3,6 +3,7 @@
 #include <afxinet.h>    //用于支持使用网络相关的类
 #include <sstream>
 #include "DataManager.h"
+#include "NetFetch.h"
 
 std::wstring CCommon::StrToUnicode(const char* str, bool utf8)
 {
@@ -36,53 +37,10 @@ std::string CCommon::UnicodeToStr(const wchar_t* wstr, bool utf8)
 
 bool CCommon::GetURL(const std::wstring& url, std::string& result, bool utf8, LPCTSTR user_agent, LPCTSTR headers, DWORD dwHeadersLength)
 {
-	bool succeed{ false };
-	CInternetSession* pSession{};
-	CHttpFile* pfile{};
-	try
-	{
-		pSession = new CInternetSession(user_agent);
-		//pfile = (CHttpFile*)pSession->OpenURL(url.c_str());
-		//CCommon::WriteLog(L"request>>>>", g_data.m_log_path.c_str());
-		pfile = (CHttpFile*)pSession->OpenURL(url.c_str(), 1, INTERNET_FLAG_TRANSFER_ASCII | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, headers, dwHeadersLength);
-		//CCommon::WriteLog(L"request<<<", g_data.m_log_path.c_str());
-		DWORD dwStatusCode;
-		pfile->QueryInfoStatusCode(dwStatusCode);
-		if (dwStatusCode == HTTP_STATUS_OK)
-		{
-			CString content;
-			CString data;
-			while (pfile->ReadString(data))
-			{
-				content += data;
-			}
-			result = (const char*)content.GetString();
-			succeed = true;
-		}
-		else
-		{
-			CCommon::WriteLog(CString(_T("HTTP status: ")) + std::to_wstring(dwStatusCode).c_str(), g_data.m_log_path.c_str());
-		}
-		pfile->Close();
-		delete pfile;
-		pSession->Close();
-	}
-	catch (CInternetException* e)
-	{
-		CCommon::WriteLog(L"request fail!", g_data.m_log_path.c_str());
-		if (pfile != nullptr)
-		{
-			pfile->Close();
-			delete pfile;
-		}
-		if (pSession != nullptr)
-			pSession->Close();
-		succeed = false;
-		e->Delete();        //没有这句会造成内存泄露
-		SAFE_DELETE(pSession);
-	}
-	SAFE_DELETE(pSession);
-	return succeed;
+	(void)utf8;
+	(void)dwHeadersLength;
+	// 网络抓取逻辑统一封装在 CNetFetch 中（自动选择直连 / SOCKS5 代理）
+	return CNetFetch::GetURL(url, result, user_agent, headers);
 }
 
 std::wstring CCommon::URLEncode(const std::wstring& wstr)
