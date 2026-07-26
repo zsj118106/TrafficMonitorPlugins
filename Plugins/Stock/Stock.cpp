@@ -12,6 +12,64 @@
 
 Stock Stock::m_instance;
 
+// 大盘指数优先级列表（用于总览列表排序）
+const std::vector<std::wstring> IndexPriority = {
+	L"sh000001",  // 上证指数
+	L"sh000300",  // 沪深300
+	L"sz399006",  // 创业板指
+	L"rt_hkHSI",  // 恒生指数
+	L"rt_hkHSTECH", // 恒生科技
+	L"sz399001",  // 深证成指
+	L"sh000016",  // 上证50
+};
+
+int GetStockPriority(const std::wstring& code)
+{
+	// 检查是否是优先级指数
+	for (size_t i = 0; i < IndexPriority.size(); i++)
+	{
+		if (code == IndexPriority[i])
+		{
+			return static_cast<int>(i);
+		}
+	}
+
+	// 检查是否是其他指数
+	// 判断逻辑：需要区分前缀
+	// sh000xxx: 上海指数（如sh000001上证指数已在优先列表中，其他sh000xxx也可能是指数）
+	// sz000xxx: 深圳个股（如sz000725京东方A），不是指数
+	// sz399xxx: 深圳指数（如sz399006创业板指已在优先列表中，其他sz399xxx也可能是指数）
+	// bj000xxx: 北京个股，不是指数
+	if (code.size() >= 8)
+	{
+		std::wstring marketPrefix = code.substr(0, 2);   // sh/sz/bj/rt等
+		std::wstring numPart = code.substr(2, 6);         // 6位数字部分
+
+		// 上海：sh000xxx为指数
+		if (marketPrefix == L"sh" && numPart.find(L"000") == 0)
+		{
+			return 100;  // 其他上海A股指数
+		}
+		// 深圳：sz399xxx为指数（sz000xxx是个股！）
+		if (marketPrefix == L"sz" && numPart.find(L"399") == 0)
+		{
+			return 100;  // 其他深圳指数
+		}
+	}
+	else if (code.size() >= 3)
+	{
+		// 无市场前缀的短代码，399开头视为指数
+		std::wstring prefix = code.substr(0, 3);
+		if (prefix == L"399")
+		{
+			return 100;
+		}
+	}
+
+	// 个股
+	return 200;
+}
+
 Stock::Stock() : m_pFloatingWnd(NULL)
 {
 	m_items = vector<StockItem>(Stock_ITEM_MAX);

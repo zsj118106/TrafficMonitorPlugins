@@ -51,6 +51,12 @@
     <ClInclude Include="Common.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ChartColors.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="ChartContext.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
     <ClInclude Include="NetFetch.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -97,6 +103,33 @@
       <Filter>DataManager</Filter>
     </ClInclude>
     <ClInclude Include="SmartSignalTestDlg.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="StockListPanel.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="CallAuctionChart.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="ChipPeakPanel.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="OrderBookPanel.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="OverviewPanel.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="IndicatorChart.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="StatusBarPanel.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="KLineChart.h">
+      <Filter>FloatingWnd</Filter>
+    </ClInclude>
+    <ClInclude Include="TimelineChart.h">
       <Filter>FloatingWnd</Filter>
     </ClInclude>
   </ItemGroup>
@@ -159,6 +192,33 @@
       <Filter>DataManager</Filter>
     </ClCompile>
     <ClCompile Include="SmartSignalTestDlg.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="StockListPanel.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="CallAuctionChart.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="ChipPeakPanel.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="OrderBookPanel.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="OverviewPanel.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="IndicatorChart.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="StatusBarPanel.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="KLineChart.cpp">
+      <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="TimelineChart.cpp">
       <Filter>FloatingWnd</Filter>
     </ClCompile>
   </ItemGroup>

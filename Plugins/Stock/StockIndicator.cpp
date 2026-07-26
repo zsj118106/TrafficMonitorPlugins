@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <deque>
 
 // ============================================================================
 // CStockIndicator 实现：所有股票指标计算逻辑（从CFloatingWnd抽取）
@@ -136,11 +137,12 @@ void CStockIndicator::CalcNiceAxisRangeSymmetric(double visMin, double visMax, d
 
 // ========== MACD指标计算 ==========
 
-std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateTimelineMACD(const std::vector<STOCK::TimelinePoint>& timelinePoint)
+std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateTimelineMACD(const std::vector<STOCK::TimelinePoint>& timelinePoint,
+	int shortPeriod /* = 12 */, int longPeriod /* = 26 */, int signalPeriod /* = 9 */)
 {
 	std::vector<MACDData> result;
 	int n = static_cast<int>(timelinePoint.size());
-	if (n == 0)
+	if (n == 0 || shortPeriod <= 0 || longPeriod <= 0 || signalPeriod <= 0)
 		return result;
 
 	result.resize(n);
@@ -153,28 +155,31 @@ std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateTimelineMACD(co
 	// 通达信初始化方式：第一根收盘价作为EMA初始值，提前生成指标
 	// 随着数据量增加，数值逐步收敛到标准值
 
-	// 计算EMA12：第一根用收盘价初始化，后续迭代
-	std::vector<double> ema12(n);
-	ema12[0] = closes[0];
+	// 计算EMA(shortPeriod)
+	double shortAlpha = 2.0 / (shortPeriod + 1);
+	std::vector<double> emaShort(n);
+	emaShort[0] = closes[0];
 	for (int i = 1; i < n; i++)
-		ema12[i] = closes[i] * 2.0 / 13.0 + ema12[i - 1] * 11.0 / 13.0;
+		emaShort[i] = closes[i] * shortAlpha + emaShort[i - 1] * (1.0 - shortAlpha);
 
-	// 计算EMA26：第一根用收盘价初始化，后续迭代
-	std::vector<double> ema26(n);
-	ema26[0] = closes[0];
+	// 计算EMA(longPeriod)
+	double longAlpha = 2.0 / (longPeriod + 1);
+	std::vector<double> emaLong(n);
+	emaLong[0] = closes[0];
 	for (int i = 1; i < n; i++)
-		ema26[i] = closes[i] * 2.0 / 27.0 + ema26[i - 1] * 25.0 / 27.0;
+		emaLong[i] = closes[i] * longAlpha + emaLong[i - 1] * (1.0 - longAlpha);
 
-	// 计算DIF = EMA12 - EMA26
+	// 计算DIF = EMA(shortPeriod) - EMA(longPeriod)
 	std::vector<double> dif(n);
 	for (int i = 0; i < n; i++)
-		dif[i] = ema12[i] - ema26[i];
+		dif[i] = emaShort[i] - emaLong[i];
 
-	// 计算DEA（DIF的9周期EMA）：第一根DIF作为初始值，后续迭代
+	// 计算DEA（DIF的signalPeriod周期EMA）
+	double signalAlpha = 2.0 / (signalPeriod + 1);
 	std::vector<double> dea(n);
 	dea[0] = dif[0];
 	for (int i = 1; i < n; i++)
-		dea[i] = dif[i] * 2.0 / 11.0 + dea[i - 1] * 9.0 / 11.0;
+		dea[i] = dif[i] * signalAlpha + dea[i - 1] * (1.0 - signalAlpha);
 
 	// 计算MACD柱 = (DIF - DEA) * 2，所有数据点均有效
 	for (int i = 0; i < n; i++)
@@ -188,11 +193,12 @@ std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateTimelineMACD(co
 	return result;
 }
 
-std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateKLineMACD(const std::vector<STOCK::KLinePoint>& klineData)
+std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateKLineMACD(const std::vector<STOCK::KLinePoint>& klineData,
+	int shortPeriod /* = 12 */, int longPeriod /* = 26 */, int signalPeriod /* = 9 */)
 {
 	std::vector<MACDData> result;
 	int n = static_cast<int>(klineData.size());
-	if (n == 0)
+	if (n == 0 || shortPeriod <= 0 || longPeriod <= 0 || signalPeriod <= 0)
 		return result;
 
 	result.resize(n);
@@ -202,28 +208,31 @@ std::vector<CStockIndicator::MACDData> CStockIndicator::CalculateKLineMACD(const
 	for (int i = 0; i < n; i++)
 		closes[i] = klineData[i].close;
 
-	// 计算EMA12
-	std::vector<double> ema12(n);
-	ema12[0] = closes[0];
+	// 计算EMA(shortPeriod)
+	double shortAlpha = 2.0 / (shortPeriod + 1);
+	std::vector<double> emaShort(n);
+	emaShort[0] = closes[0];
 	for (int i = 1; i < n; i++)
-		ema12[i] = closes[i] * 2.0 / 13.0 + ema12[i - 1] * 11.0 / 13.0;
+		emaShort[i] = closes[i] * shortAlpha + emaShort[i - 1] * (1.0 - shortAlpha);
 
-	// 计算EMA26
-	std::vector<double> ema26(n);
-	ema26[0] = closes[0];
+	// 计算EMA(longPeriod)
+	double longAlpha = 2.0 / (longPeriod + 1);
+	std::vector<double> emaLong(n);
+	emaLong[0] = closes[0];
 	for (int i = 1; i < n; i++)
-		ema26[i] = closes[i] * 2.0 / 27.0 + ema26[i - 1] * 25.0 / 27.0;
+		emaLong[i] = closes[i] * longAlpha + emaLong[i - 1] * (1.0 - longAlpha);
 
-	// 计算DIF = EMA12 - EMA26
+	// 计算DIF = EMA(shortPeriod) - EMA(longPeriod)
 	std::vector<double> dif(n);
 	for (int i = 0; i < n; i++)
-		dif[i] = ema12[i] - ema26[i];
+		dif[i] = emaShort[i] - emaLong[i];
 
-	// 计算DEA（DIF的9周期EMA）
+	// 计算DEA（DIF的signalPeriod周期EMA）
+	double signalAlpha = 2.0 / (signalPeriod + 1);
 	std::vector<double> dea(n);
 	dea[0] = dif[0];
 	for (int i = 1; i < n; i++)
-		dea[i] = dif[i] * 2.0 / 11.0 + dea[i - 1] * 9.0 / 11.0;
+		dea[i] = dif[i] * signalAlpha + dea[i - 1] * (1.0 - signalAlpha);
 
 	// 计算MACD柱 = (DIF - DEA) * 2
 	for (int i = 0; i < n; i++)
@@ -244,8 +253,9 @@ std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectMACDCross(c
 		return signals;
 
 	const double epsilon = 1e-6; // 粘合阈值：差值小于此值视为未交叉
-	const int MIN_CROSS_GAP = 10; // 两次交叉之间最少间隔10根K线，防止0轴附近频繁缠绕
-	int lastCrossIdx = -MIN_CROSS_GAP; // 上次交叉位置
+	const int SAME_DIR_MIN_GAP = 5; // 同方向交叉最少间隔5根K线，间隔内的标记为Repeated
+	int lastGoldenIdx = -SAME_DIR_MIN_GAP; // 上次金叉位置
+	int lastDeathIdx = -SAME_DIR_MIN_GAP; // 上次死叉位置
 
 	for (size_t i = 1; i < macdData.size(); i++)
 	{
@@ -264,19 +274,27 @@ std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectMACDCross(c
 		// 金叉：上一时刻DIF < DEA，当前时刻DIF > DEA
 		if (difPrev < deaPrev && difNow > deaNow)
 		{
-			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			if (static_cast<int>(i) - lastGoldenIdx >= SAME_DIR_MIN_GAP)
 			{
 				signals[i] = MACDCrossSignal::GoldenCross;
-				lastCrossIdx = static_cast<int>(i);
+				lastGoldenIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = MACDCrossSignal::RepeatedGoldenCross;
 			}
 		}
 		// 死叉：上一时刻DIF > DEA，当前时刻DIF < DEA
 		else if (difPrev > deaPrev && difNow < deaNow)
 		{
-			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			if (static_cast<int>(i) - lastDeathIdx >= SAME_DIR_MIN_GAP)
 			{
 				signals[i] = MACDCrossSignal::DeathCross;
-				lastCrossIdx = static_cast<int>(i);
+				lastDeathIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = MACDCrossSignal::RepeatedDeathCross;
 			}
 		}
 	}
@@ -295,6 +313,82 @@ CStockIndicator::MACDCrossSignal CStockIndicator::GetLatestMACDCross(const std::
 	return MACDCrossSignal::None;
 }
 
+RegResult CStockIndicator::CalcDIFTrend(const std::vector<MACDData>& macdData, int lookback /* = 6 */)
+{
+	RegResult result;
+	result.valid = false;
+	result.slope = 0.0;
+	result.r2 = 0.0;
+
+	int n = static_cast<int>(macdData.size());
+	if (n < lookback || lookback < 3)
+		return result;
+
+	// 取最近 lookback 个有效DIF值
+	std::deque<double> win;
+	for (int i = n - 1; i >= 0 && static_cast<int>(win.size()) < lookback; i--)
+	{
+		if (macdData[i].valid)
+			win.push_front(macdData[i].dif);
+	}
+	if (static_cast<int>(win.size()) < lookback)
+		return result;
+
+	// 当DIF值太小时，放大为整数计算，避免浮点精度丢失
+	// 找到窗口内最大绝对值
+	double maxAbs = 0;
+	for (double v : win)
+		maxAbs = (std::max)(maxAbs, std::abs(v));
+
+	double scale = 1.0;
+	if (maxAbs > 0 && maxAbs < 1.0)
+	{
+		// 放大到最大绝对值约为 1000~10000 的整数范围
+		scale = 1000.0 / maxAbs;
+		// 取整到10的幂次
+		double pow10 = 1.0;
+		while (pow10 * 10 <= scale) pow10 *= 10;
+		while (pow10 / 10 > scale) pow10 /= 10;
+		scale = pow10;
+	}
+
+	// 线性回归计算
+	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
+	int wn = static_cast<int>(win.size());
+	for (int i = 0; i < wn; i++)
+	{
+		double x = static_cast<double>(i);
+		double y = win[i] * scale;  // 放大后计算
+		Sx += x;
+		Sy += y;
+		Sxx += x * x;
+		Syy += y * y;
+		Sxy += x * y;
+	}
+
+	double dn = static_cast<double>(wn);
+	double denom = dn * Sxx - Sx * Sx;
+	if (denom == 0.0)
+		return result;
+
+	double numer = dn * Sxy - Sx * Sy;
+	result.slope = (numer / denom) / scale;  // 斜率还原
+
+	double SStotal = dn * Syy - Sy * Sy;
+	if (SStotal == 0.0)
+	{
+		result.r2 = 1.0;
+	}
+	else
+	{
+		double SSres = SStotal - numer * numer / denom;
+		result.r2 = 1.0 - SSres / SStotal;
+	}
+
+	result.valid = true;
+	return result;
+}
+
 std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectKDJCross(const std::vector<KDJData>& kdjData)
 {
 	std::vector<MACDCrossSignal> signals(kdjData.size(), MACDCrossSignal::None);
@@ -302,8 +396,9 @@ std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectKDJCross(co
 		return signals;
 
 	const double epsilon = 1e-6;
-	const int MIN_CROSS_GAP = 10;
-	int lastCrossIdx = -MIN_CROSS_GAP;
+	const int SAME_DIR_MIN_GAP = 5; // 同方向交叉最少间隔5根K线，间隔内的标记为Repeated
+	int lastGoldenIdx = -SAME_DIR_MIN_GAP;
+	int lastDeathIdx = -SAME_DIR_MIN_GAP;
 
 	for (size_t i = 1; i < kdjData.size(); i++)
 	{
@@ -322,19 +417,27 @@ std::vector<CStockIndicator::MACDCrossSignal> CStockIndicator::DetectKDJCross(co
 		// 金叉：K上穿D，且前一根K值<=30
 		if (kPrev < dPrev && kNow > dNow && kPrev <= 30.0)
 		{
-			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			if (static_cast<int>(i) - lastGoldenIdx >= SAME_DIR_MIN_GAP)
 			{
 				signals[i] = MACDCrossSignal::GoldenCross;
-				lastCrossIdx = static_cast<int>(i);
+				lastGoldenIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = MACDCrossSignal::RepeatedGoldenCross;
 			}
 		}
 		// 死叉：K下穿D，且前一根K值>=70
 		else if (kPrev > dPrev && kNow < dNow && kPrev >= 70.0)
 		{
-			if (static_cast<int>(i) - lastCrossIdx >= MIN_CROSS_GAP)
+			if (static_cast<int>(i) - lastDeathIdx >= SAME_DIR_MIN_GAP)
 			{
 				signals[i] = MACDCrossSignal::DeathCross;
-				lastCrossIdx = static_cast<int>(i);
+				lastDeathIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = MACDCrossSignal::RepeatedDeathCross;
 			}
 		}
 	}
@@ -647,7 +750,7 @@ CSignalAnalyzer::T0Signal CStockIndicator::DetectSellSignal(const std::vector<ST
 
 		// 死叉检测
 		auto crossSignals = DetectMACDCross(macdData);
-		if (last < static_cast<int>(crossSignals.size()) && crossSignals[last] == MACDCrossSignal::DeathCross)
+		if (last < static_cast<int>(crossSignals.size()) && (crossSignals[last] == MACDCrossSignal::DeathCross || crossSignals[last] == MACDCrossSignal::RepeatedDeathCross))
 		{
 			strength++;
 			reasons += _T("MACD死叉 ");
@@ -707,16 +810,20 @@ CSignalAnalyzer::T0Signal CStockIndicator::DetectSellSignal(const std::vector<ST
 
 // ========== KDJ指标计算 ==========
 
-std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::vector<STOCK::KLinePoint>& klineData, int period /* = 9 */)
+std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::vector<STOCK::KLinePoint>& klineData, int n /* = 9 */, int m1 /* = 3 */, int m2 /* = 3 */)
 {
 	std::vector<KDJData> result;
 	result.reserve(klineData.size());
-	if (klineData.empty() || period <= 0)
+	if (klineData.empty() || n <= 0 || m1 <= 0 || m2 <= 0)
 		return result;
 
 	// 初始 K = D = 50
 	double prevK = 50.0;
 	double prevD = 50.0;
+	double kAlpha = 1.0 / m1;
+	double kBeta = static_cast<double>(m1 - 1) / m1;
+	double dAlpha = 1.0 / m2;
+	double dBeta = static_cast<double>(m2 - 1) / m2;
 
 	for (int i = 0; i < static_cast<int>(klineData.size()); i++)
 	{
@@ -726,13 +833,13 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::v
 		kd.j = 0;
 		kd.valid = false;
 
-		// 需要至少 period 个数据点才能计算 RSV
-		if (i >= period - 1)
+		// 需要至少 n 个数据点才能计算 RSV
+		if (i >= n - 1)
 		{
 			STOCK::Price highest = 0;
 			STOCK::Price lowest = (std::numeric_limits<STOCK::Price>::max)();
 			bool hasValid = false;
-			for (int j = i - period + 1; j <= i; j++)
+			for (int j = i - n + 1; j <= i; j++)
 			{
 				if (klineData[j].high > 0)
 				{
@@ -753,10 +860,10 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::v
 				if (rsv < 0) rsv = 0;
 				if (rsv > 100) rsv = 100;
 
-				// K(t) = 2/3 * K(t-1) + 1/3 * RSV(t)
-				double curK = 2.0 / 3.0 * prevK + 1.0 / 3.0 * rsv;
-				// D(t) = 2/3 * D(t-1) + 1/3 * K(t)
-				double curD = 2.0 / 3.0 * prevD + 1.0 / 3.0 * curK;
+				// K(t) = (m1-1)/m1 * K(t-1) + 1/m1 * RSV(t)
+				double curK = kBeta * prevK + kAlpha * rsv;
+				// D(t) = (m2-1)/m2 * D(t-1) + 1/m2 * K(t)
+				double curD = dBeta * prevD + dAlpha * curK;
 				// J = 3K - 2D
 				double curJ = 3.0 * curK - 2.0 * curD;
 
@@ -779,7 +886,7 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::v
 		}
 		else
 		{
-			// 前 period-1 个数据点无法计算 RSV，使用初始值 50
+			// 前 n-1 个数据点无法计算 RSV，使用初始值 50
 			kd.k = prevK;
 			kd.d = prevD;
 			kd.j = 3.0 * prevK - 2.0 * prevD;
@@ -792,15 +899,19 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateKDJ(const std::v
 	return result;
 }
 
-std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateTimelineKDJ(const std::vector<STOCK::TimelinePoint>& timelinePoint, int period /* = 9 */)
+std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateTimelineKDJ(const std::vector<STOCK::TimelinePoint>& timelinePoint, int n /* = 9 */, int m1 /* = 3 */, int m2 /* = 3 */)
 {
 	std::vector<KDJData> result;
 	result.reserve(timelinePoint.size());
-	if (timelinePoint.empty() || period <= 0)
+	if (timelinePoint.empty() || n <= 0 || m1 <= 0 || m2 <= 0)
 		return result;
 
 	double prevK = 50.0;
 	double prevD = 50.0;
+	double kAlpha = 1.0 / m1;
+	double kBeta = static_cast<double>(m1 - 1) / m1;
+	double dAlpha = 1.0 / m2;
+	double dBeta = static_cast<double>(m2 - 1) / m2;
 
 	for (int i = 0; i < static_cast<int>(timelinePoint.size()); i++)
 	{
@@ -810,12 +921,12 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateTimelineKDJ(cons
 		kd.j = 0;
 		kd.valid = false;
 
-		if (i >= period - 1)
+		if (i >= n - 1)
 		{
 			STOCK::Price highest = 0;
 			STOCK::Price lowest = (std::numeric_limits<STOCK::Price>::max)();
 			bool hasValid = false;
-			for (int j = i - period + 1; j <= i; j++)
+			for (int j = i - n + 1; j <= i; j++)
 			{
 				STOCK::Price price = timelinePoint[j].price;
 				if (price > 0)
@@ -832,8 +943,8 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateTimelineKDJ(cons
 				if (rsv < 0) rsv = 0;
 				if (rsv > 100) rsv = 100;
 
-				double curK = 2.0 / 3.0 * prevK + 1.0 / 3.0 * rsv;
-				double curD = 2.0 / 3.0 * prevD + 1.0 / 3.0 * curK;
+				double curK = kBeta * prevK + kAlpha * rsv;
+				double curD = dBeta * prevD + dAlpha * curK;
 				double curJ = 3.0 * curK - 2.0 * curD;
 
 				kd.k = curK;
@@ -863,6 +974,64 @@ std::vector<CStockIndicator::KDJData> CStockIndicator::CalculateTimelineKDJ(cons
 		result.push_back(kd);
 	}
 
+	return result;
+}
+
+RegResult CStockIndicator::CalcKDJTrend(const std::vector<KDJData>& kdjData, int lookback /* = 6 */)
+{
+	RegResult result;
+	result.valid = false;
+	result.slope = 0.0;
+	result.r2 = 0.0;
+
+	int n = static_cast<int>(kdjData.size());
+	if (n < lookback || lookback < 3)
+		return result;
+
+	// 取最近 lookback 个有效K值
+	std::deque<double> win;
+	for (int i = n - 1; i >= 0 && static_cast<int>(win.size()) < lookback; i--)
+	{
+		if (kdjData[i].valid)
+			win.push_front(kdjData[i].k);
+	}
+	if (static_cast<int>(win.size()) < lookback)
+		return result;
+
+	// KDJ的J值范围通常在0~100，不需要放大，直接计算
+	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
+	int wn = static_cast<int>(win.size());
+	for (int i = 0; i < wn; i++)
+	{
+		double x = static_cast<double>(i);
+		double y = win[i];
+		Sx += x;
+		Sy += y;
+		Sxx += x * x;
+		Syy += y * y;
+		Sxy += x * y;
+	}
+
+	double dn = static_cast<double>(wn);
+	double denom = dn * Sxx - Sx * Sx;
+	if (denom == 0.0)
+		return result;
+
+	double numer = dn * Sxy - Sx * Sy;
+	result.slope = numer / denom;
+
+	double SStotal = dn * Syy - Sy * Sy;
+	if (SStotal == 0.0)
+	{
+		result.r2 = 1.0;
+	}
+	else
+	{
+		double SSres = SStotal - numer * numer / denom;
+		result.r2 = 1.0 - SSres / SStotal;
+	}
+
+	result.valid = true;
 	return result;
 }
 

@@ -2,6 +2,7 @@
 
 #include "StockDef.h"
 #include "SignalAnalyzer.h"
+#include "DataManager.h"
 #include <string>
 #include <vector>
 
@@ -35,9 +36,11 @@ public:
 
 	// MACD金叉死叉信号
 	enum class MACDCrossSignal {
-		None,       // 无信号
-		GoldenCross,// 金叉：DIF从下往上穿过DEA
-		DeathCross  // 死叉：DIF从上往下跌破DEA
+		None,                  // 无信号
+		GoldenCross,           // 金叉：DIF从下往上穿过DEA（同方向5根K线内第一个，显示标签）
+		DeathCross,            // 死叉：DIF从上往下跌破DEA（同方向5根K线内第一个，显示标签）
+		RepeatedGoldenCross,   // 重复金叉：同方向5根K线内后续的金叉，只绘制圆点不显示标签
+		RepeatedDeathCross     // 重复死叉：同方向5根K线内后续的死叉，只绘制圆点不显示标签
 	};
 
 	// KDJ指标数据
@@ -93,16 +96,26 @@ public:
 	// ========== MACD指标计算 ==========
 
 	// 计算分时MACD序列（基于TimelinePoint.price）
-	static std::vector<MACDData> CalculateTimelineMACD(const std::vector<STOCK::TimelinePoint>& timelinePoint);
+	// shortPeriod/longPeriod/signalPeriod: MACD三参数，默认12/26/9
+	static std::vector<MACDData> CalculateTimelineMACD(const std::vector<STOCK::TimelinePoint>& timelinePoint,
+		int shortPeriod = 12, int longPeriod = 26, int signalPeriod = 9);
 
 	// 计算K线MACD序列（基于KLinePoint.close）
-	static std::vector<MACDData> CalculateKLineMACD(const std::vector<STOCK::KLinePoint>& klineData);
+	// shortPeriod/longPeriod/signalPeriod: MACD三参数，默认12/26/9
+	static std::vector<MACDData> CalculateKLineMACD(const std::vector<STOCK::KLinePoint>& klineData,
+		int shortPeriod = 12, int longPeriod = 26, int signalPeriod = 9);
 
 	// 检测MACD金叉死叉序列（返回每个位置的信号）
 	static std::vector<MACDCrossSignal> DetectMACDCross(const std::vector<MACDData>& macdData);
 
 	// 获取最近一次MACD金叉死叉信号
 	static MACDCrossSignal GetLatestMACDCross(const std::vector<MACDData>& macdData);
+
+	// 计算DIF趋势（线性回归斜率），用于判断DIF线方向
+	// macdData: MACD序列；lookback: 回看窗口长度，默认6
+	// 返回 RegResult（slope>0 表示DIF上升趋势，slope<0 表示下降趋势）
+	// 当DIF值太小时，内部自动放大为整数计算，不影响原始MACD数据
+	static RegResult CalcDIFTrend(const std::vector<MACDData>& macdData, int lookback = 6);
 
 	// 检测KDJ金叉死叉序列（金叉：K上穿D且前一根K<=30，死叉：K下穿D且前一根K>=70）
 	static std::vector<MACDCrossSignal> DetectKDJCross(const std::vector<KDJData>& kdjData);
@@ -120,10 +133,17 @@ public:
 	// ========== KDJ指标计算 ==========
 
 	// 计算K线KDJ序列
-	static std::vector<KDJData> CalculateKDJ(const std::vector<STOCK::KLinePoint>& klineData, int period = 9);
+	// n: RSV周期, m1: K平滑系数, m2: D平滑系数，默认9,3,3
+	static std::vector<KDJData> CalculateKDJ(const std::vector<STOCK::KLinePoint>& klineData, int n = 9, int m1 = 3, int m2 = 3);
 
 	// 计算分时KDJ序列
-	static std::vector<KDJData> CalculateTimelineKDJ(const std::vector<STOCK::TimelinePoint>& timelinePoint, int period = 9);
+	// n: RSV周期, m1: K平滑系数, m2: D平滑系数，默认9,3,3
+	static std::vector<KDJData> CalculateTimelineKDJ(const std::vector<STOCK::TimelinePoint>& timelinePoint, int n = 9, int m1 = 3, int m2 = 3);
+
+	// 计算KDJ趋势（基于K值的线性回归斜率），用于判断K线方向
+	// kdjData: KDJ序列；lookback: 回看窗口长度，默认6
+	// 返回 RegResult（slope>0 表示K值上升趋势，slope<0 表示下降趋势）
+	static RegResult CalcKDJTrend(const std::vector<KDJData>& kdjData, int lookback = 6);
 
 	// ========== W&R威廉指标计算 ==========
 

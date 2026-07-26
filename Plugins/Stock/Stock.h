@@ -19,6 +19,12 @@ constexpr auto kHF = L"hf";    // 海外期货
 
 const std::vector<CString> StockTypeSet{ kSH, kSZ, kHK, kMG, kBJ };
 
+// 大盘指数优先级列表（用于总览列表排序）
+extern const std::vector<std::wstring> IndexPriority;
+
+// 获取股票优先级：<200为指数（值越小优先级越高），>=200为个股
+int GetStockPriority(const std::wstring& code);
+
 #define Stock_ITEM_MAX 20
 
 class Stock : public ITMPlugin

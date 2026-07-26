@@ -256,6 +256,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Common.h" />
+    <ClInclude Include="ChartColors.h" />
+    <ClInclude Include="ChartContext.h" />
+    <ClInclude Include="CallAuctionChart.h" />
+    <ClInclude Include="ChipPeakPanel.h" />
+    <ClInclude Include="IndicatorChart.h" />
+    <ClInclude Include="OrderBookPanel.h" />
+    <ClInclude Include="OverviewPanel.h" />
+    <ClInclude Include="StatusBarPanel.h" />
+    <ClInclude Include="KLineChart.h" />
+    <ClInclude Include="TimelineChart.h" />
     <ClInclude Include="DataManager.h" />
     <ClInclude Include="FloatingWnd.h" />
     <ClInclude Include="SignalAnalyzer.h" />
@@ -275,11 +285,20 @@
     <ClInclude Include="Stock.h" />
     <ClInclude Include="StockDef.h" />
     <ClInclude Include="StockItem.h" />
+    <ClInclude Include="StockListPanel.h" />
     <ClInclude Include="TradeRecordDialog.h" />
     <ClInclude Include="TransparentWnd.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Common.cpp" />
+    <ClCompile Include="CallAuctionChart.cpp" />
+    <ClCompile Include="ChipPeakPanel.cpp" />
+    <ClCompile Include="IndicatorChart.cpp" />
+    <ClCompile Include="OrderBookPanel.cpp" />
+    <ClCompile Include="OverviewPanel.cpp" />
+    <ClCompile Include="StatusBarPanel.cpp" />
+    <ClCompile Include="KLineChart.cpp" />
+    <ClCompile Include="TimelineChart.cpp" />
     <ClCompile Include="DataManager.cpp" />
     <ClCompile Include="FloatingWnd.cpp" />
     <ClCompile Include="LocalHttpProxy.cpp" />
@@ -307,6 +326,7 @@
     <ClCompile Include="Stock.cpp" />
     <ClCompile Include="StockDef.cpp" />
     <ClCompile Include="StockItem.cpp" />
+    <ClCompile Include="StockListPanel.cpp" />
     <ClCompile Include="TradeRecordDialog.cpp" />
     <ClCompile Include="TransparentWnd.cpp" />
   </ItemGroup>
