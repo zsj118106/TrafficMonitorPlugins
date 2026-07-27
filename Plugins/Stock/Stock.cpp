@@ -124,18 +124,10 @@ const wchar_t* Stock::GetTooltipInfo()
 
 void Stock::DataRequired()
 {
-	static time_t last_req_time{ -1 };
 	time_t cur_time = time(nullptr);
-	bool bMarketOpen = CDataManager::IsMarketOpen();
 	bool bTradingSession = CDataManager::IsTradingDaySession();
 	bool bCallAuction = CDataManager::IsCallAuctionSession();
-	// 交易时段正常请求；午休期间降低频率请求（60秒一次）；非交易日/收盘后不请求（全天模式除外）
-	time_t requestInterval = bMarketOpen ? 3 : (bTradingSession ? 60 : 3);
-	if (cur_time - m_instance.m_last_request_time > requestInterval && (bTradingSession || g_data.m_setting_data.m_full_day == 1))
-	{
-		last_req_time = cur_time;
-		SendStockInfoRequest();
-	}
+	// 实时行情数据由 StockFetchThread 工作线程自主定时获取（盘中2秒，午休60秒），无需外部驱动
 	// 集合竞价时段（9:15-9:30）：每3秒获取一次竞价数据
 	if (bCallAuction)
 	{

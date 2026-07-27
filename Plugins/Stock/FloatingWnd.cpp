@@ -2425,7 +2425,7 @@ void CFloatingWnd::OnMouseMove(UINT nFlags, CPoint point)
 							else
 								s.Format(_T("%.3f"), val);
 							return s;
-						};
+							};
 						m_timelineMacdTitleTip.Format(_T("DIF:%s DEA:%s"), formatMACDValue(macdData[globalIdx].dif), formatMACDValue(macdData[globalIdx].dea));
 					}
 				}
@@ -3086,7 +3086,7 @@ void CFloatingWnd::SetDayKLineModeDefaults()
 	m_showAmplitudeBands = false;
 	m_btnBoll.SetWindowText(_T("ZF"));
 	m_showTrendView = false;  // 日K默认显示K线图
-	m_showChipPeak = true;
+	m_showChipPeak = false;
 	m_showMA = false;
 	m_scrollOffset = 0;
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;  // 日K线初始缩放到最大，显示最新40根

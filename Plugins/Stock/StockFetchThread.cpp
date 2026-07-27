@@ -65,6 +65,7 @@ void CStockFetchThread::Stop()
 		m_has_callAuction_task = false;
 		m_callAuction_task = nullptr;
 		m_background_tasks.clear();
+		m_realtime_last_fetch = 0;
 	}
 	m_cv.notify_all();
 
@@ -234,7 +235,59 @@ void CStockFetchThread::Run()
 			continue;  // 执行完即时任务后立即检查下一个，不等待
 		}
 
-		// 2. 检查图表定时任务
+		// 2. 检查实时行情定时任务（盘中2秒，午休60秒）
+		bool needRealtime = false;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			if (m_stopping.load())
+				return;
+
+			// 仅在交易时段或全天模式下获取实时行情
+			bool bTradingSession = CDataManager::IsTradingDaySession();
+			bool bFullDay = g_data.m_setting_data.m_full_day == 1;
+			if (bTradingSession || bFullDay)
+			{
+				if (g_data.m_setting_data.m_stock_codes.empty())
+				{
+					// 无股票代码时重置文本，并标记已获取避免重复
+					if (m_realtime_last_fetch != 0)
+					{
+						g_data.ResetText();
+						m_realtime_last_fetch = time(nullptr);
+					}
+				}
+				else
+				{
+					time_t interval = CDataManager::IsMarketOpen()
+						? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
+					time_t elapsed = time(nullptr) - m_realtime_last_fetch;
+					if (elapsed >= interval)
+						needRealtime = true;
+				}
+			}
+		}
+
+		if (needRealtime)
+		{
+			try
+			{
+				g_data.RequestRealtimeData();
+			}
+			catch (CInternetException* e)
+			{
+				e->Delete();
+			}
+			catch (...)
+			{
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_realtime_last_fetch = time(nullptr);
+			}
+			continue;  // 执行完实时行情后立即检查下一个任务
+		}
+
+		// 3. 检查图表定时任务
 		std::wstring stockId;
 		time_t now = time(nullptr);
 		int chartType = -1;
@@ -302,14 +355,29 @@ void CStockFetchThread::Run()
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
-		// 3. 没有即时任务也没有到时的图表任务，计算等待时间
+		// 4. 没有即时任务也没有到时的定时任务，计算等待时间
 		{
 			std::unique_lock<std::mutex> lock(m_mutex);
 			if (m_stopping.load())
 				return;
 
-			// 计算最近的图表任务还需要等多久
+			// 计算最近的定时任务还需要等多久
 			time_t minWaitSec = 1;  // 默认1秒轮询一次（确保能及时响应新投递的任务）
+
+			// 实时行情等待时间
+			bool bTradingSession = CDataManager::IsTradingDaySession();
+			bool bFullDay = g_data.m_setting_data.m_full_day == 1;
+			if ((bTradingSession || bFullDay) && !g_data.m_setting_data.m_stock_codes.empty())
+			{
+				time_t rtInterval = CDataManager::IsMarketOpen()
+					? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
+				time_t rtElapsed = time(nullptr) - m_realtime_last_fetch;
+				time_t rtRemaining = rtInterval - rtElapsed;
+				if (rtRemaining > 0 && rtRemaining < minWaitSec)
+					minWaitSec = rtRemaining;
+			}
+
+			// 图表任务等待时间
 			if (!m_focus_stock_id.empty())
 			{
 				now = time(nullptr);

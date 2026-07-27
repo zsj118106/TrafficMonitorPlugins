@@ -10,7 +10,8 @@
 // 将所有网络数据获取与 UI 交互彻底分离：
 //  - 持有一个长期运行的后台线程，避免每次请求都创建/销毁线程
 //  - 工作线程只执行数据获取任务（HTTP 请求），不触碰任何 MFC/UI 对象
-//  - 实时行情/集合竞价：通过 PostTask/PostCallAuctionTask 投递，忙时丢弃
+//  - 实时行情：线程自主定时获取（盘中2秒，午休60秒），无需外部驱动
+//  - 集合竞价：通过 PostCallAuctionTask 投递，忙时丢弃
 //  - 后台任务：通过 PostBackgroundTask 投递，排队执行，不丢弃
 //  - 图表数据（分时/K线/IOPV）：线程自主定时获取，外部只需设置关注的股票ID
 //  - 切换股票时调用 SetFocusStockId，线程自动重置计时器并立即获取新股数据
@@ -26,7 +27,7 @@ public:
 	// 通知工作线程退出并等待其结束（在主线程退出前调用）
 	void Stop();
 
-	// 投递一个常规实时行情数据获取任务到工作线程
+	// 投递一个常规任务到工作线程（用于日K线等一次性请求）
 	// 线程未启动、正在退出或当前正忙于执行同类任务时，忽略本次请求
 	void PostTask(Task task);
 	// 投递一个集合竞价数据获取任务到工作线程
@@ -59,6 +60,11 @@ private:
 	static time_t GetChartInterval(int type);
 	// 各图表数据类型的上次获取时间
 	time_t m_chart_last_fetch[4] = {};  // IOPV, Timeline, Min5KLine, Min30KLine
+
+	// 实时行情定时获取
+	time_t m_realtime_last_fetch = 0;	// 上次获取实时行情的时间
+	static const time_t REALTIME_INTERVAL_TRADING = 2;	// 盘中实时行情间隔（秒）
+	static const time_t REALTIME_INTERVAL_LUNCH = 60;	// 午休期间间隔（秒）
 
 	mutable std::mutex m_mutex;
 	std::condition_variable m_cv;
