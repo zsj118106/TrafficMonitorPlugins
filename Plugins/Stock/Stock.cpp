@@ -466,6 +466,13 @@ void Stock::UpdateKLine()
 	}
 }
 
+void Stock::NotifyFloatingWndUpdate()
+{
+	std::lock_guard<std::mutex> lock(m_wndMutex);
+	if (m_pFloatingWnd != NULL && ::IsWindow(m_pFloatingWnd->GetSafeHwnd()))
+		m_pFloatingWnd->PostMessage(FWND_MSG_UPDATE_STATUS, 0, 0);
+}
+
 bool Stock::IsPriceInSafeZone(double current_price, double bid1_price, double ask1_price, double low, double high)
 {
 	bool is_in_safe_zone = true;

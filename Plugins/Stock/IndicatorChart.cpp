@@ -389,11 +389,16 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 
 	// 5分钟K线用7,15,5参数，分时(1分钟)用6,12,4参数，30分钟和日K用默认12,26,9
 	int shortP = 12, longP = 26, signalP = 9;
-	if (hover.isMin5KLineMode)
+	if (hover.isMin30KLineMode)
+	{
+		shortP = 9; longP = 19; signalP = 7;
+	}
+	else if (hover.isMin5KLineMode)
 	{
 		shortP = 7; longP = 15; signalP = 5;
 	}
-	else if (!hover.isMin30KLineMode && !hover.isKLineMode)
+
+	else if (!hover.isKLineMode)
 	{
 		shortP = 6; longP = 12; signalP = 4;
 	}
@@ -409,14 +414,14 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 			CSize ts = memDC.GetTextExtent(label);
 			memDC.TextOut(xPos, centerY - ts.cy / 2, label);
 			xPos += ts.cx;
-		};
+			};
 		auto drawValue = [&](const CString& value, double val) {
 			COLORREF valColor = (val >= 0) ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 			memDC.SetTextColor(valColor);
 			CSize ts = memDC.GetTextExtent(value);
 			memDC.TextOut(xPos, centerY - ts.cy / 2, value);
 			xPos += ts.cx + g_data.RDPI(4);
-		};
+			};
 		auto formatMACDValue = [](double val) -> CString {
 			CString s;
 			double absVal = std::abs(val);
@@ -427,7 +432,7 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 			else
 				s.Format(_T("%.3f"), val);
 			return s;
-		};
+			};
 
 		// 获取当前显示的DIF/DEA值（悬停时从tip解析，非悬停时取最新数据）
 		double difVal = 0, deaVal = 0;
@@ -562,7 +567,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 			CSize ts = memDC.GetTextExtent(label);
 			memDC.TextOut(xPos, centerY - ts.cy / 2, label);
 			xPos += ts.cx;
-		};
+			};
 		auto drawKDJValue = [&](const CString& value, double val) {
 			// KDJ值：>50红色，<50绿色，=50灰色
 			COLORREF valColor = (val > 50) ? COLOR_RED_UP : ((val < 50) ? COLOR_GREEN_DOWN : COLOR_GRAY_TEXT);
@@ -570,7 +575,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 			CSize ts = memDC.GetTextExtent(value);
 			memDC.TextOut(xPos, centerY - ts.cy / 2, value);
 			xPos += ts.cx + g_data.RDPI(4);
-		};
+			};
 
 		// 获取当前K/D/J值
 		double kVal = 0, dVal = 0, jVal = 0;

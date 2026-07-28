@@ -845,6 +845,9 @@ namespace STOCK
 				data.innerVolume = it.second->info.innerVolume;
 				data.outerVolume = it.second->info.outerVolume;
 				data.turnoverRate = it.second->info.turnoverRate;
+				data.iopv = it.second->info.iopv;
+				data.iopvPrevClose = it.second->info.iopvPrevClose;
+				data.iopvPremiumRate = it.second->info.iopvPremiumRate;
 				it.second->info = data;
 			}
 		}

@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "TimelineChart.h"
 #include "ChartColors.h"
 #include "Common.h"
@@ -1925,44 +1925,79 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 	}
 	else if ((hover.isMin5KLineMode || hover.isMin30KLineMode) && ctx.klineData && !ctx.klineData->empty())
 	{
+		// 5分钟/30分钟K线模式：标题栏与分时模式一致，显示现价/IOPV/均价
+		STOCK::Price prevClose = ctx.realtimeData.prevClosePrice;
+
+		bool isHovering = (hover.hoveredBarIndex >= 0 && hover.isHoveringVolume);
+		STOCK::Price dispAvgPrice = isHovering ? hover.hoveredData.averagePrice : timelinePoint.back().averagePrice;
+		if (dispAvgPrice <= 0)
+			dispAvgPrice = isHovering ? hover.hoverMa1 : ctx.ma1;
+
 		int xPos = g_data.RDPI(4);
 		int centerY = areaTop + titleH / 2;
 
-		const auto& klineData = *ctx.klineData;
-		int klineIdx = -1;
-		bool isHovering = (hover.hoveredBarIndex >= 0 && hover.isHoveringVolume);
-		if (isHovering)
+		auto drawLabelValue = [&](const CString& labelText, STOCK::Price value, COLORREF labelColor, COLORREF valueColor) {
+			CString valStr = CCommon::FormatFloat(value);
+			memDC.SetTextColor(labelColor);
+			CSize ls = memDC.GetTextExtent(labelText);
+			memDC.TextOut(xPos, centerY - ls.cy / 2, labelText);
+			xPos += ls.cx;
+			memDC.SetTextColor(valueColor);
+			CSize vs = memDC.GetTextExtent(valStr);
+			memDC.TextOut(xPos, centerY - vs.cy / 2, valStr);
+			xPos += vs.cx + g_data.RDPI(4);
+			};
+
+		auto cmpPrevClose = [prevClose](STOCK::Price p) -> COLORREF {
+			if (prevClose <= 0) return COLOR_BLACK;
+			if (p > prevClose) return COLOR_RED_UP;
+			if (p < prevClose) return COLOR_GREEN_DOWN;
+			return COLOR_BLACK;
+			};
+		drawLabelValue(_T("现:"), ctx.realtimeData.currentPrice, COLOR_BLACK, cmpPrevClose(ctx.realtimeData.currentPrice));
+
+		if (ctx.realtimeData.IsETF() && ctx.realtimeData.iopv > 0)
 		{
-			klineIdx = ctx.startIndex + hover.hoveredBarIndex;
+			COLORREF iopvColor = COLOR_BLACK;
+			if (ctx.realtimeData.iopv > ctx.realtimeData.currentPrice)
+				iopvColor = COLOR_RED_UP;
+			else if (ctx.realtimeData.iopv < ctx.realtimeData.currentPrice)
+				iopvColor = COLOR_GREEN_DOWN;
+
+			CString iopvLabel = _T("IOPV:");
+			CString iopvVal;
+			iopvVal.Format(_T("%.4f"), ctx.realtimeData.iopv);
+			memDC.SetTextColor(COLOR_BLACK);
+			CSize iopvLs = memDC.GetTextExtent(iopvLabel);
+			memDC.TextOut(xPos, centerY - iopvLs.cy / 2, iopvLabel);
+			xPos += iopvLs.cx;
+			memDC.SetTextColor(iopvColor);
+			CSize iopvVs = memDC.GetTextExtent(iopvVal);
+			memDC.TextOut(xPos, centerY - iopvVs.cy / 2, iopvVal);
+			xPos += iopvVs.cx + g_data.RDPI(4);
+
+			CString premLabel = _T("溢:");
+			CString premVal;
+			double premRate = ctx.realtimeData.iopvPremiumRate;
+			if (premRate >= 0)
+				premVal.Format(_T("+%.2f%%"), premRate);
+			else
+				premVal.Format(_T("%.2f%%"), premRate);
+			COLORREF premColor = premRate > 0 ? COLOR_RED_UP : (premRate < 0 ? COLOR_GREEN_DOWN : COLOR_BLACK);
+			memDC.SetTextColor(COLOR_BLACK);
+			CSize premLs = memDC.GetTextExtent(premLabel);
+			memDC.TextOut(xPos, centerY - premLs.cy / 2, premLabel);
+			xPos += premLs.cx;
+			memDC.SetTextColor(premColor);
+			CSize premVs = memDC.GetTextExtent(premVal);
+			memDC.TextOut(xPos, centerY - premVs.cy / 2, premVal);
+			xPos += premVs.cx + g_data.RDPI(4);
+
+			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
 		}
 		else
 		{
-			klineIdx = ctx.startIndex + static_cast<int>(timelinePoint.size()) - 1;
-		}
-		if (klineIdx < 0 || klineIdx >= static_cast<int>(klineData.size()))
-			klineIdx = static_cast<int>(klineData.size()) - 1;
-
-		if (klineIdx >= 0 && klineIdx < static_cast<int>(klineData.size()))
-		{
-			const auto& kp = klineData[klineIdx];
-			STOCK::Price prevClose = ctx.realtimeData.prevClosePrice;
-
-			auto drawKLineLabel = [&](const CString& label, STOCK::Price value, COLORREF labelColor, COLORREF valueColor) {
-				CString valStr = CCommon::FormatFloat(value);
-				memDC.SetTextColor(labelColor);
-				CSize ls = memDC.GetTextExtent(label);
-				memDC.TextOut(xPos, centerY - ls.cy / 2, label);
-				xPos += ls.cx;
-				memDC.SetTextColor(valueColor);
-				CSize vs = memDC.GetTextExtent(valStr);
-				memDC.TextOut(xPos, centerY - vs.cy / 2, valStr);
-				xPos += vs.cx + g_data.RDPI(4);
-				};
-
-			drawKLineLabel(_T("开:"), kp.open, COLOR_BLACK, (kp.open >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
-			drawKLineLabel(_T("收:"), kp.close, COLOR_BLACK, (kp.close >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
-			drawKLineLabel(_T("高:"), kp.high, COLOR_BLACK, (kp.high >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
-			drawKLineLabel(_T("低:"), kp.low, COLOR_BLACK, (kp.low >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
+			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
 		}
 	}
 	else if (!timelinePoint.empty())

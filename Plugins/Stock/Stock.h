@@ -62,6 +62,9 @@ public:
 	bool IsPriceInSafeZone(double current_price, double bid1_price, double ask1_price, double low, double high);
 	void CheckPriceAlertForStock(const std::wstring& code);
 
+	// 通知浮动窗口刷新显示（线程安全，可从工作线程调用）
+	void NotifyFloatingWndUpdate();
+
 public:
 	std::mutex m_stockDataMutex;
 

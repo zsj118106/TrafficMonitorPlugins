@@ -2,6 +2,8 @@
 #include "StockFetchThread.h"
 #include "DataManager.h"
 #include "Common.h"
+#include "Stock.h"
+#include "FloatingWnd.h"
 #include <afxwin.h>
 #include <afxinet.h>
 
@@ -40,6 +42,8 @@ void CStockFetchThread::Start()
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
 
 	m_stopping = false;
+
+	// 启动图表线程（即时任务/集合竞价/后台任务/图表定时获取）
 	CWinThread* pThread = AfxBeginThread(ThreadProc, this, THREAD_PRIORITY_NORMAL, 0, CREATE_SUSPENDED);
 	if (pThread == nullptr)
 	{
@@ -50,6 +54,18 @@ void CStockFetchThread::Start()
 	m_thread_handle = pThread->m_hThread;
 	m_pThread = pThread;
 	ResumeThread(m_thread_handle);
+
+	// 启动实时行情线程（所有股票价格+五档，独立运行不阻塞图表线程）
+	CWinThread* pRtThread = AfxBeginThread(RealtimeThreadProc, this, THREAD_PRIORITY_NORMAL, 0, CREATE_SUSPENDED);
+	if (pRtThread == nullptr)
+	{
+		m_started = false;
+		return;
+	}
+	pRtThread->m_bAutoDelete = FALSE;
+	m_realtime_thread_handle = pRtThread->m_hThread;
+	m_realtime_pThread = pRtThread;
+	ResumeThread(m_realtime_thread_handle);
 }
 
 void CStockFetchThread::Stop()
@@ -57,18 +73,23 @@ void CStockFetchThread::Stop()
 	if (!m_started.exchange(false))
 		return;
 
+	m_stopping = true;
+
+	// 唤醒图表线程
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		m_stopping = true;
 		m_has_task = false;
 		m_task = nullptr;
 		m_has_callAuction_task = false;
 		m_callAuction_task = nullptr;
 		m_background_tasks.clear();
-		m_realtime_last_fetch = 0;
 	}
 	m_cv.notify_all();
 
+	// 唤醒实时行情线程
+	m_realtime_cv.notify_all();
+
+	// 等待图表线程退出
 	if (m_thread_handle != nullptr)
 	{
 		WaitForSingleObject(m_thread_handle, 5000);
@@ -79,6 +100,17 @@ void CStockFetchThread::Stop()
 	m_pThread = nullptr;
 	m_busy = false;
 	m_callAuction_busy = false;
+
+	// 等待实时行情线程退出
+	if (m_realtime_thread_handle != nullptr)
+	{
+		WaitForSingleObject(m_realtime_thread_handle, 5000);
+		CloseHandle(m_realtime_thread_handle);
+		m_realtime_thread_handle = nullptr;
+	}
+	delete m_realtime_pThread;
+	m_realtime_pThread = nullptr;
+	m_realtime_last_fetch = 0;
 }
 
 void CStockFetchThread::PostTask(Task task)
@@ -183,14 +215,14 @@ void CStockFetchThread::Run()
 
 	while (true)
 	{
-		// 1. 先检查是否有投递的即时任务（实时行情/集合竞价/后台任务）
+		// 1. 先检查是否有投递的即时任务（日K线/集合竞价/后台任务）
 		Task task;
 		bool isCallAuctionTask = false;
 		bool isBackgroundTask = false;
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 
-			// 优先级：常规任务 > 集合竞价 > 后台任务 > 图表定时任务
+			// 优先级：常规任务 > 集合竞价 > 后台任务 > 图表定时任务（实时行情在独立线程）
 			if (m_has_task)
 			{
 				task = std::move(m_task);
@@ -235,59 +267,7 @@ void CStockFetchThread::Run()
 			continue;  // 执行完即时任务后立即检查下一个，不等待
 		}
 
-		// 2. 检查实时行情定时任务（盘中2秒，午休60秒）
-		bool needRealtime = false;
-		{
-			std::lock_guard<std::mutex> lock(m_mutex);
-			if (m_stopping.load())
-				return;
-
-			// 仅在交易时段或全天模式下获取实时行情
-			bool bTradingSession = CDataManager::IsTradingDaySession();
-			bool bFullDay = g_data.m_setting_data.m_full_day == 1;
-			if (bTradingSession || bFullDay)
-			{
-				if (g_data.m_setting_data.m_stock_codes.empty())
-				{
-					// 无股票代码时重置文本，并标记已获取避免重复
-					if (m_realtime_last_fetch != 0)
-					{
-						g_data.ResetText();
-						m_realtime_last_fetch = time(nullptr);
-					}
-				}
-				else
-				{
-					time_t interval = CDataManager::IsMarketOpen()
-						? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
-					time_t elapsed = time(nullptr) - m_realtime_last_fetch;
-					if (elapsed >= interval)
-						needRealtime = true;
-				}
-			}
-		}
-
-		if (needRealtime)
-		{
-			try
-			{
-				g_data.RequestRealtimeData();
-			}
-			catch (CInternetException* e)
-			{
-				e->Delete();
-			}
-			catch (...)
-			{
-			}
-			{
-				std::lock_guard<std::mutex> lock(m_mutex);
-				m_realtime_last_fetch = time(nullptr);
-			}
-			continue;  // 执行完实时行情后立即检查下一个任务
-		}
-
-		// 3. 检查图表定时任务
+		// 2. 检查图表定时任务
 		std::wstring stockId;
 		time_t now = time(nullptr);
 		int chartType = -1;
@@ -355,29 +335,14 @@ void CStockFetchThread::Run()
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
-		// 4. 没有即时任务也没有到时的定时任务，计算等待时间
+		// 3. 没有即时任务也没有到时的图表任务，计算等待时间
 		{
 			std::unique_lock<std::mutex> lock(m_mutex);
 			if (m_stopping.load())
 				return;
 
-			// 计算最近的定时任务还需要等多久
+			// 计算最近的图表任务还需要等多久
 			time_t minWaitSec = 1;  // 默认1秒轮询一次（确保能及时响应新投递的任务）
-
-			// 实时行情等待时间
-			bool bTradingSession = CDataManager::IsTradingDaySession();
-			bool bFullDay = g_data.m_setting_data.m_full_day == 1;
-			if ((bTradingSession || bFullDay) && !g_data.m_setting_data.m_stock_codes.empty())
-			{
-				time_t rtInterval = CDataManager::IsMarketOpen()
-					? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
-				time_t rtElapsed = time(nullptr) - m_realtime_last_fetch;
-				time_t rtRemaining = rtInterval - rtElapsed;
-				if (rtRemaining > 0 && rtRemaining < minWaitSec)
-					minWaitSec = rtRemaining;
-			}
-
-			// 图表任务等待时间
 			if (!m_focus_stock_id.empty())
 			{
 				now = time(nullptr);
@@ -396,5 +361,79 @@ void CStockFetchThread::Run()
 			// 等待：可被 PostTask/PostBackgroundTask/SetFocusStockId/Stop 提前唤醒
 			m_cv.wait_for(lock, std::chrono::seconds(minWaitSec));
 		}
+	}
+}
+
+UINT CStockFetchThread::RealtimeThreadProc(LPVOID pParam)
+{
+	CStockFetchThread* pThis = static_cast<CStockFetchThread*>(pParam);
+	pThis->RunRealtime();
+	return 0;
+}
+
+void CStockFetchThread::RunRealtime()
+{
+	AFX_MANAGE_STATE(AfxGetStaticModuleState());
+
+	while (true)
+	{
+		if (m_stopping.load())
+			return;
+
+		// 检查是否需要获取实时行情
+		bool bTradingSession = CDataManager::IsTradingDaySession();
+		bool bFullDay = g_data.m_setting_data.m_full_day == 1;
+		bool needFetch = false;
+		time_t waitSec = 1;  // 默认1秒后重新检查
+
+		if (bTradingSession || bFullDay)
+		{
+			if (g_data.m_setting_data.m_stock_codes.empty())
+			{
+				// 无股票代码时重置文本，并标记已获取避免重复
+				if (m_realtime_last_fetch != 0)
+				{
+					g_data.ResetText();
+					m_realtime_last_fetch = time(nullptr);
+				}
+			}
+			else
+			{
+				time_t interval = CDataManager::IsMarketOpen()
+					? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
+				time_t elapsed = time(nullptr) - m_realtime_last_fetch;
+				if (elapsed >= interval)
+					needFetch = true;
+				else
+					waitSec = interval - elapsed;
+			}
+		}
+
+		if (needFetch)
+		{
+			try
+			{
+				g_data.RequestRealtimeData();
+			}
+			catch (CInternetException* e)
+			{
+				e->Delete();
+			}
+			catch (...)
+			{
+			}
+			m_realtime_last_fetch = time(nullptr);
+
+			// 数据获取完成后通知浮动窗口刷新
+			Stock::Instance().NotifyFloatingWndUpdate();
+
+			continue;  // 获取完成后立即检查是否需要下一次
+		}
+
+		// 等待：可被 Stop 提前唤醒
+		std::unique_lock<std::mutex> lock(m_realtime_mutex);
+		if (m_stopping.load())
+			return;
+		m_realtime_cv.wait_for(lock, std::chrono::seconds(waitSec));
 	}
 }

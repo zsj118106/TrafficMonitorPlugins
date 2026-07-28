@@ -8,13 +8,11 @@
 
 // 股票数据获取专用工作线程
 // 将所有网络数据获取与 UI 交互彻底分离：
-//  - 持有一个长期运行的后台线程，避免每次请求都创建/销毁线程
-//  - 工作线程只执行数据获取任务（HTTP 请求），不触碰任何 MFC/UI 对象
-//  - 实时行情：线程自主定时获取（盘中2秒，午休60秒），无需外部驱动
-//  - 集合竞价：通过 PostCallAuctionTask 投递，忙时丢弃
-//  - 后台任务：通过 PostBackgroundTask 投递，排队执行，不丢弃
-//  - 图表数据（分时/K线/IOPV）：线程自主定时获取，外部只需设置关注的股票ID
-//  - 切换股票时调用 SetFocusStockId，线程自动重置计时器并立即获取新股数据
+//  - 持有两个长期运行的后台线程，避免每次请求都创建/销毁线程
+//  - 实时行情线程：自主定时获取所有股票价格+五档（盘中2秒，午休60秒）
+//  - 图表线程：处理即时任务/集合竞价/后台任务/图表定时获取（分时/K线/IOPV）
+//  - 两个线程独立运行，互不阻塞
+//  - 切换股票时调用 SetFocusStockId，图表线程自动重置计时器并立即获取新股数据
 class CStockFetchThread
 {
 public:
@@ -22,9 +20,9 @@ public:
 
 	static CStockFetchThread& Instance();
 
-	// 启动工作线程（幂等，重复调用安全）
+	// 启动工作线程（实时行情线程 + 图表线程，幂等，重复调用安全）
 	void Start();
-	// 通知工作线程退出并等待其结束（在主线程退出前调用）
+	// 通知所有工作线程退出并等待其结束（在主线程退出前调用）
 	void Stop();
 
 	// 投递一个常规任务到工作线程（用于日K线等一次性请求）
@@ -56,6 +54,10 @@ private:
 	static UINT ThreadProc(LPVOID pParam);
 	void Run();
 
+	// 实时行情独立线程
+	static UINT RealtimeThreadProc(LPVOID pParam);
+	void RunRealtime();
+
 	// 各图表数据类型的获取间隔（秒）
 	static time_t GetChartInterval(int type);
 	// 各图表数据类型的上次获取时间
@@ -70,6 +72,10 @@ private:
 	std::condition_variable m_cv;
 	std::atomic<bool> m_started{ false };
 	std::atomic<bool> m_stopping{ false };
+
+	// 实时行情线程独立的同步设施（与图表线程互不干扰）
+	std::mutex m_realtime_mutex;
+	std::condition_variable m_realtime_cv;
 
 	// 常规任务（实时行情）
 	std::atomic<bool> m_busy{ false };
@@ -89,4 +95,8 @@ private:
 
 	HANDLE m_thread_handle{ nullptr };
 	class CWinThread* m_pThread{ nullptr };
+
+	// 实时行情线程
+	HANDLE m_realtime_thread_handle{ nullptr };
+	class CWinThread* m_realtime_pThread{ nullptr };
 };
