@@ -43,67 +43,25 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 
 	int textX = left + g_data.RDPI(5) + 3;
 
-	// 更新买一/卖一挂盘数量变化方向
+	// 获取买一/卖一挂单瞬时变化量（正=增加，负=减少），读取后清零
 	auto stockDataForAccum = g_data.GetStockData(stockId);
-	auto GetOrderPriceAccumLots = [&](STOCK::Price price) -> STOCK::Volume {
+	auto GetOrderDeltaLots = [&](STOCK::Price price) -> STOCK::Volume {
 		if (!stockDataForAccum || price <= 0)
 			return 0;
 		auto it = stockDataForAccum->orderPriceAccumMap.find(price);
 		if (it == stockDataForAccum->orderPriceAccumMap.end())
 			return 0;
-		return it->second.accumSellVolume / 100;
+		STOCK::Volume delta = it->second.deltaVolume / 100;
+		it->second.deltaVolume = 0;  // 消费后清零，下次只显示新变化
+		return delta;
 		};
-	CString ask1VolumeTrend, bid1VolumeTrend;
-	{
-		static std::map<std::wstring, STOCK::Volume> lastAsk1VolumeMap;
-		static std::map<std::wstring, STOCK::Volume> lastBid1VolumeMap;
-		static std::map<std::wstring, CString> lastAsk1VolumeTrendMap;
-		static std::map<std::wstring, CString> lastBid1VolumeTrendMap;
-		STOCK::Volume curAsk1Volume = stockInfo.askLevels[0].volume;
-		STOCK::Volume curBid1Volume = stockInfo.bidLevels[0].volume;
-
-		auto lastAsk1VolumeIt = lastAsk1VolumeMap.find(stockId);
-		if (lastAsk1VolumeIt != lastAsk1VolumeMap.end())
-		{
-			if (curAsk1Volume > lastAsk1VolumeIt->second)
-				ask1VolumeTrend = _T("↑");
-			else if (curAsk1Volume < lastAsk1VolumeIt->second)
-				ask1VolumeTrend = _T("↓");
-			else
-			{
-				auto lastTrendIt = lastAsk1VolumeTrendMap.find(stockId);
-				if (lastTrendIt != lastAsk1VolumeTrendMap.end())
-					ask1VolumeTrend = lastTrendIt->second;
-			}
-		}
-		lastAsk1VolumeMap[stockId] = curAsk1Volume;
-		if (!ask1VolumeTrend.IsEmpty())
-			lastAsk1VolumeTrendMap[stockId] = ask1VolumeTrend;
-
-		auto lastBid1VolumeIt = lastBid1VolumeMap.find(stockId);
-		if (lastBid1VolumeIt != lastBid1VolumeMap.end())
-		{
-			if (curBid1Volume > lastBid1VolumeIt->second)
-				bid1VolumeTrend = _T("↑");
-			else if (curBid1Volume < lastBid1VolumeIt->second)
-				bid1VolumeTrend = _T("↓");
-			else
-			{
-				auto lastTrendIt = lastBid1VolumeTrendMap.find(stockId);
-				if (lastTrendIt != lastBid1VolumeTrendMap.end())
-					bid1VolumeTrend = lastTrendIt->second;
-			}
-		}
-		lastBid1VolumeMap[stockId] = curBid1Volume;
-		if (!bid1VolumeTrend.IsEmpty())
-			lastBid1VolumeTrendMap[stockId] = bid1VolumeTrend;
-	}
 	struct OrderBookRow
 	{
 		STOCK::Price price;
 		CString text;
 		CString smallSuffix;
-		CString rightAlignSuffix;  // 右对齐的累加成交量
+		CString rightAlignSuffix;  // 右对齐的瞬时变化量（+N/-N）
+		COLORREF rightAlignSuffixColor{ COLOR_BLACK };  // 右对齐后缀颜色
 		COLORREF textColor;
 		bool fillBackground{ false };
 		COLORREF backgroundColor;
@@ -147,38 +105,27 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		askTxt.Format(_T("S%d:%s"), idx + 1, priceStr);
 		CString askSuffix;
 		askSuffix.Format(_T(" %s"), volumeStr.GetString());
-		STOCK::Volume accum = GetOrderPriceAccumLots(price);
-		CString accumStr;
-		if (accum > 0)
+		STOCK::Volume delta = GetOrderDeltaLots(price);
+		CString deltaStr;
+		if (delta != 0)
 		{
-			accumStr = CCommon::FormatVolumeInt(accum);
-			if (idx == 0 && !ask1VolumeTrend.IsEmpty())
-				askSuffix.AppendFormat(_T("%s"), ask1VolumeTrend.GetString());
+			CString deltaVal = CCommon::FormatVolumeInt(std::abs(delta));
+			deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 		}
 
 		OrderBookRow row;
 		row.price = price;
 		row.text = askTxt;
 		row.smallSuffix = askSuffix;
-		row.rightAlignSuffix = accumStr;
+		row.rightAlignSuffix = deltaStr;
+		row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		row.drawSmallSuffix = true;
 		row.textColor = COLOR_RED_UP;
-		// 卖一背景色按3档强度区分（仅当前价格=卖一时显示）
+		// 卖一背景色（仅当前价格=卖一时显示）
 		if (idx == 0 && stockInfo.currentPrice > 0 && price > 0 && stockInfo.currentPrice == price)
 		{
 			row.fillBackground = true;
-			if (volume > accum)
-				row.backgroundColor = RGB(255, 200, 200);   // 弱：挂单量>累加量
-			else if (accum > volume * 2)
-			{
-				row.backgroundColor = RGB(180, 50, 50);     // 强：累加量/挂单量>2
-				row.darkBackground = true;
-			}
-			else
-			{
-				row.backgroundColor = RGB(240, 40, 40);     // 中：1~2之间
-				row.darkBackground = true;
-			}
+			row.backgroundColor = RGB(255, 200, 200);
 			// 挂单量≤1万时闪烁
 			if (volume <= 10000)
 				row.blink = true;
@@ -202,38 +149,27 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		bidTxt.Format(_T("B%d:%s"), i + 1, priceStr);
 		CString bidSuffix;
 		bidSuffix.Format(_T(" %s"), volumeStr.GetString());
-		STOCK::Volume accum = GetOrderPriceAccumLots(price);
-		CString accumStr;
-		if (accum > 0)
+		STOCK::Volume delta = GetOrderDeltaLots(price);
+		CString deltaStr;
+		if (delta != 0)
 		{
-			accumStr = CCommon::FormatVolumeInt(accum);
-			if (i == 0 && !bid1VolumeTrend.IsEmpty())
-				bidSuffix.AppendFormat(_T("%s"), bid1VolumeTrend.GetString());
+			CString deltaVal = CCommon::FormatVolumeInt(std::abs(delta));
+			deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 		}
 
 		OrderBookRow row;
 		row.price = price;
 		row.text = bidTxt;
 		row.smallSuffix = bidSuffix;
-		row.rightAlignSuffix = accumStr;
+		row.rightAlignSuffix = deltaStr;
+		row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		row.drawSmallSuffix = true;
 		row.textColor = COLOR_GREEN_DOWN;
-		// 买一背景色按3档强度区分（仅当前价格=买一时显示）
+		// 买一背景色（仅当前价格=买一时显示）
 		if (i == 0 && stockInfo.currentPrice > 0 && price > 0 && stockInfo.currentPrice == price)
 		{
 			row.fillBackground = true;
-			if (volume > accum)
-				row.backgroundColor = RGB(200, 255, 200);   // 弱：挂单量>累加量
-			else if (accum > volume * 2)
-			{
-				row.backgroundColor = RGB(25, 120, 25);     // 强：累加量/挂单量>2
-				row.darkBackground = true;
-			}
-			else
-			{
-				row.backgroundColor = RGB(50, 180, 50);     // 中：1~2之间
-				row.darkBackground = true;
-			}
+			row.backgroundColor = RGB(200, 255, 200);
 			// 挂单量≤1万时闪烁
 			if (volume <= 10000)
 				row.blink = true;
@@ -284,7 +220,7 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 				CFont smallFont;
 				smallFont.CreateFontIndirect(&lf);
 				memDC.SelectObject(&smallFont);
-				memDC.SetTextColor(row.darkBackground ? RGB(255, 255, 200) : textColor);
+				memDC.SetTextColor(row.rightAlignSuffixColor);
 				int suffixW = memDC.GetTextExtent(row.rightAlignSuffix).cx;
 				memDC.TextOut(x + rowWidth - suffixW - g_data.RDPI(4), y + g_data.RDPI(1), row.rightAlignSuffix);
 				memDC.SelectObject(oldFont);
@@ -302,9 +238,10 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		memDC.SelectObject(&smallFont);
 		memDC.SetTextColor(row.darkBackground ? RGB(255, 255, 200) : textColor);
 		memDC.TextOut(suffixX, y + g_data.RDPI(1), row.smallSuffix);
-		// 右对齐绘制累加成交量
+		// 右对齐绘制瞬时变化量
 		if (!row.rightAlignSuffix.IsEmpty())
 		{
+			memDC.SetTextColor(row.rightAlignSuffixColor);
 			int raSuffixW = memDC.GetTextExtent(row.rightAlignSuffix).cx;
 			memDC.TextOut(x + rowWidth - raSuffixW - g_data.RDPI(4), y + g_data.RDPI(1), row.rightAlignSuffix);
 		}

@@ -319,7 +319,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		unitY = ctx.priceChartHeight / (maxPrice - minPrice);
 	}
 
-	CPen pKLine(PS_SOLID, 2, COLOR_DARK_GRAY_BORDER);
+	CPen pKLine(PS_SOLID, 1, COLOR_BLACK);
 	memDC.SelectObject(&pKLine);
 
 	std::vector<CPoint> dataPoints;

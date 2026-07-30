@@ -89,10 +89,12 @@ void CStockFetchThread::Stop()
 	// 唤醒实时行情线程
 	m_realtime_cv.notify_all();
 
-	// 等待图表线程退出
+	// 等待图表线程退出（最多2秒，超时则强制终止）
 	if (m_thread_handle != nullptr)
 	{
-		WaitForSingleObject(m_thread_handle, 5000);
+		DWORD waitResult = WaitForSingleObject(m_thread_handle, 2000);
+		if (waitResult != WAIT_OBJECT_0)
+			TerminateThread(m_thread_handle, 0);
 		CloseHandle(m_thread_handle);
 		m_thread_handle = nullptr;
 	}
@@ -101,10 +103,12 @@ void CStockFetchThread::Stop()
 	m_busy = false;
 	m_callAuction_busy = false;
 
-	// 等待实时行情线程退出
+	// 等待实时行情线程退出（最多2秒，超时则强制终止）
 	if (m_realtime_thread_handle != nullptr)
 	{
-		WaitForSingleObject(m_realtime_thread_handle, 5000);
+		DWORD waitResult = WaitForSingleObject(m_realtime_thread_handle, 2000);
+		if (waitResult != WAIT_OBJECT_0)
+			TerminateThread(m_realtime_thread_handle, 0);
 		CloseHandle(m_realtime_thread_handle);
 		m_realtime_thread_handle = nullptr;
 	}
@@ -249,6 +253,8 @@ void CStockFetchThread::Run()
 		// 执行即时任务
 		if (task)
 		{
+			if (m_stopping.load())
+				return;
 			try
 			{
 				task();
@@ -264,7 +270,8 @@ void CStockFetchThread::Run()
 				m_callAuction_busy = false;
 			else if (!isBackgroundTask)
 				m_busy = false;
-			continue;  // 执行完即时任务后立即检查下一个，不等待
+			// UI刷新由实时行情线程统一驱动，此处仅更新数据
+			continue;
 		}
 
 		// 2. 检查图表定时任务
@@ -301,6 +308,8 @@ void CStockFetchThread::Run()
 		// 执行图表任务
 		if (chartType >= 0)
 		{
+			if (m_stopping.load())
+				return;
 			try
 			{
 				switch (chartType)
@@ -332,6 +341,7 @@ void CStockFetchThread::Run()
 				std::lock_guard<std::mutex> lock(m_mutex);
 				m_chart_last_fetch[chartType] = time(nullptr);
 			}
+			// UI刷新由实时行情线程统一驱动，此处仅更新数据
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
@@ -411,6 +421,8 @@ void CStockFetchThread::RunRealtime()
 
 		if (needFetch)
 		{
+			if (m_stopping.load())
+				return;
 			try
 			{
 				g_data.RequestRealtimeData();

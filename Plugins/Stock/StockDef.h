@@ -452,7 +452,7 @@ namespace STOCK
 	struct OrderPriceAccum
 	{
 		Volume prevVolume{ 0 };       // 上一次该价格挂盘数量
-		Volume accumSellVolume{ 0 };  // 该价格挂盘数量减少累计
+		Volume deltaVolume{ 0 };      // 本次挂单瞬时变化量（正=增加，负=减少，0=无变化）
 		bool isAskSide{ true };       // true=卖方，false=买方
 	};
 
@@ -464,7 +464,7 @@ namespace STOCK
 		ChipDistribution chipDistribution;
 		CallAuctionData callAuctionData;  // 集合竞价数据
 
-		// 买一到买五、卖一到卖五按价格跟踪挂盘减少累计量（股）
+		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量（股）
 		std::map<Price, OrderPriceAccum> orderPriceAccumMap;
 
 		// 使用智能指针管理历史数据

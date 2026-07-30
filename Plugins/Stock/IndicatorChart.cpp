@@ -1243,7 +1243,7 @@ void CIndicatorChart::DrawTimelineKDJChart(CDC& memDC, int x, int y, int width, 
 		else memDC.LineTo(pointX, pointY);
 	}
 
-	CPen jPen(PS_SOLID, 2, RGB(0, 136, 34));
+	CPen jPen(PS_SOLID, 1, RGB(0, 136, 34));
 	memDC.SelectObject(&jPen);
 	bool jFirst = true;
 	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(kdjData.size()); i++)

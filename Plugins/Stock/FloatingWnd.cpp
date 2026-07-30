@@ -323,7 +323,12 @@ BOOL CFloatingWnd::Create(CFont* font, CPoint pt, std::wstring stock_id)
 	BringWindowToTop();
 	SetForegroundWindow();
 
-	// 设置完全透明
+	// 设置弹出窗口半透明（180兼顾可读性和隐蔽性）
+	HWND hWnd = this->m_hWnd;
+	::SetWindowLongPtr(hWnd, GWL_EXSTYLE, ::GetWindowLongPtr(hWnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+	::SetLayeredWindowAttributes(hWnd, RGB(255, 255, 255), 220, LWA_ALPHA);
+
+	// 设置父窗口完全透明
 	m_CTransparentWnd.SetLayeredWindowAttributes(0, 0, LWA_ALPHA);
 	m_CTransparentWnd.ShowWindow(SW_SHOW);
 
@@ -3032,13 +3037,11 @@ void CFloatingWnd::EnsureChipPeakData()
 		if (needRequest)
 		{
 			// 通过 StockFetchThread 后台任务队列执行，避免创建临时线程
-			HWND hWnd = GetSafeHwnd();
 			std::wstring stockId = m_stock_id;
-			CStockFetchThread::Instance().PostBackgroundTask([hWnd, stockId]() {
+			CStockFetchThread::Instance().PostBackgroundTask([stockId]() {
 				g_data.RequestStockBasicData(stockId);
 				g_data.RequestChipDistributionData(stockId);
-				if (::IsWindow(hWnd))
-					::PostMessage(hWnd, FWND_MSG_UPDATE_STATUS, 0, 0);
+				// UI刷新由实时行情线程统一驱动，此处仅更新数据
 				});
 		}
 	}

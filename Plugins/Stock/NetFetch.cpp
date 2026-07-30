@@ -143,10 +143,10 @@ bool CNetFetch::FetchOnce(const std::wstring& url, std::string& result,
 
 	CInternetSession session(agent, 1, accessType, proxyStr, NULL, 0);
 
-	// 设置超时
+	// 设置超时（缩短超时避免线程退出时长时间阻塞）
 	session.SetOption(INTERNET_OPTION_CONNECT_TIMEOUT, connect_timeout * 1000);
-	session.SetOption(INTERNET_OPTION_SEND_TIMEOUT, 30000);
-	session.SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, 30000);
+	session.SetOption(INTERNET_OPTION_SEND_TIMEOUT, 5000);
+	session.SetOption(INTERNET_OPTION_RECEIVE_TIMEOUT, 5000);
 
 	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_KEEP_CONNECTION;
 	if (isHttps)

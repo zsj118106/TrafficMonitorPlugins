@@ -80,10 +80,12 @@ void STOCK::StockMarket::LoadRealtimeDataByJson(std::string json, const std::vec
 
 		stockData->info.Load(key, data_arr);
 
-		// 买一到买五、卖一到卖五按价格跟踪挂盘减少累计量，仅买一/卖一参与累加
+		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量
+		// 仅新浪API（主数据源）计算delta并更新prevVolume
+		// 腾讯API不重复计算，避免两个API数据相同时delta被抵消
 		{
 			std::map<Price, OrderPriceAccum> currentPrices;
-			auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide, bool canAccum) {
+			auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide) {
 				if (level.price <= 0)
 					return;
 
@@ -95,15 +97,14 @@ void STOCK::StockMarket::LoadRealtimeDataByJson(std::string json, const std::vec
 					return;
 				}
 
-				if (canAccum && level.volume < it->second.prevVolume)
-					it->second.accumSellVolume += it->second.prevVolume - level.volume;
+				it->second.deltaVolume += level.volume - it->second.prevVolume;
 				it->second.prevVolume = level.volume;
 				};
 
 			for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
 			{
-				updateLevelAccum(stockData->info.askLevels[i], true, i == 0);
-				updateLevelAccum(stockData->info.bidLevels[i], false, i == 0);
+				updateLevelAccum(stockData->info.askLevels[i], true);
+				updateLevelAccum(stockData->info.bidLevels[i], false);
 			}
 
 			for (auto it = stockData->orderPriceAccumMap.begin(); it != stockData->orderPriceAccumMap.end(); )
@@ -182,42 +183,13 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 		//   [19]=卖一价 [20]=卖一量(手) [21]=卖二价 [22]=卖二量(手) ...
 		//   [30]=时间 [31]=涨跌额 [32]=涨跌幅 [33]=最高 [34]=最低
 		//   [36]=成交量(手) [37]=成交额(万) [38]=换手率 [43]=振幅 [44]=涨停 [45]=跌停
-		//   [47]=IOPV [48]=IOPV昨收 [49]=IOPV涨跌幅
+		// A股：腾讯API仅补充内外盘和换手率，不覆盖新浪API的价格/五档买卖盘等数据
+		// 内外盘和换手率已在上方 LoadInnerOuterData 逻辑中处理
+		// 此处仅补充涨停/跌停价和流通股本（新浪API不提供）
 		bool isAG = (key.find(kSH) == 0 || key.find(kSZ) == 0 || key.find(kBJ) == 0);
 		if (isAG && data_arr.size() >= 35)
 		{
 			StockInfo& info = stockData->info;
-			if (!data_arr[1].empty())
-				info.displayName = CCommon::StrToUnicode(data_arr[1].c_str());
-			info.currentPrice = { convert<Price>(data_arr[3]) };
-			info.prevClosePrice = { convert<Price>(data_arr[4]) };
-			info.openPrice = { convert<Price>(data_arr[5]) };
-			// data[6]成交量单位为手，data[36]也是手，统一用data[6]*100
-			info.volume = { convert<Volume>(data_arr[6]) * 100 };
-			if (data_arr.size() >= 34)
-			{
-				info.highPrice = { convert<Price>(data_arr[33]) };
-				info.lowPrice = { convert<Price>(data_arr[34]) };
-			}
-			// data[37]成交额单位为万元
-			if (data_arr.size() >= 38 && !data_arr[37].empty())
-				info.turnover = { convert<Amount>(data_arr[37]) * 10000 };
-
-			// 五档买卖盘（腾讯单位为手，需*100转为股）
-			if (data_arr.size() >= 29)
-			{
-				info.bidLevels[0] = { {convert<Price>(data_arr[9])}, {convert<Volume>(data_arr[10]) * 100} };
-				info.bidLevels[1] = { {convert<Price>(data_arr[11])}, {convert<Volume>(data_arr[12]) * 100} };
-				info.bidLevels[2] = { {convert<Price>(data_arr[13])}, {convert<Volume>(data_arr[14]) * 100} };
-				info.bidLevels[3] = { {convert<Price>(data_arr[15])}, {convert<Volume>(data_arr[16]) * 100} };
-				info.bidLevels[4] = { {convert<Price>(data_arr[17])}, {convert<Volume>(data_arr[18]) * 100} };
-
-				info.askLevels[0] = { {convert<Price>(data_arr[19])}, {convert<Volume>(data_arr[20]) * 100} };
-				info.askLevels[1] = { {convert<Price>(data_arr[21])}, {convert<Volume>(data_arr[22]) * 100} };
-				info.askLevels[2] = { {convert<Price>(data_arr[23])}, {convert<Volume>(data_arr[24]) * 100} };
-				info.askLevels[3] = { {convert<Price>(data_arr[25])}, {convert<Volume>(data_arr[26]) * 100} };
-				info.askLevels[4] = { {convert<Price>(data_arr[27])}, {convert<Volume>(data_arr[28]) * 100} };
-			}
 
 			// 涨停/跌停价 [47]=涨停价 [48]=跌停价
 			if (data_arr.size() >= 49)
@@ -236,66 +208,8 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 					info.circulatingAShares = static_cast<STOCK::Volume>(flowMarketValue / info.currentPrice * 100000000.0);
 				}
 			}
-
-			// 计算涨跌显示
-			if (info.currentPrice > 0 && info.prevClosePrice > 0)
-			{
-				CString priceStr = info.IsETF() ? CCommon::FormatETFPrice(info.currentPrice) : CCommon::FormatFloat(info.currentPrice);
-				info.displayPrice = std::wstring(priceStr.GetString());
-
-				char buff[32];
-				float diff = info.currentPrice - info.prevClosePrice;
-				float change = diff / info.prevClosePrice * 100;
-				if (diff > 0)
-					sprintf_s(buff, "(+%g) ", diff);
-				else
-					sprintf_s(buff, "(%g) ", diff);
-				info.displayFluctuationDiff = CCommon::StrToUnicode(buff);
-				sprintf_s(buff, "%.2f%%", std::fabs(change));
-				info.displayFluctuation = CCommon::StrToUnicode(buff);
-
-				Price upperLimit = abs(info.highPrice - info.prevClosePrice);
-				Price lowerLimit = abs(info.lowPrice - info.prevClosePrice);
-				info.priceLimit = max(upperLimit, lowerLimit);
-
-				info.is_ok = true;
-			}
-
-			// 买一到买五、卖一到卖五按价格跟踪挂盘减少累计量，仅买一/卖一参与累加
-			{
-				std::map<Price, OrderPriceAccum> currentPrices;
-				auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide, bool canAccum) {
-					if (level.price <= 0)
-						return;
-
-					currentPrices[level.price] = { level.volume, 0, isAskSide };
-					auto it = stockData->orderPriceAccumMap.find(level.price);
-					if (it == stockData->orderPriceAccumMap.end() || it->second.isAskSide != isAskSide)
-					{
-						stockData->orderPriceAccumMap[level.price] = { level.volume, 0, isAskSide };
-						return;
-					}
-
-					if (canAccum && level.volume < it->second.prevVolume)
-						it->second.accumSellVolume += it->second.prevVolume - level.volume;
-					it->second.prevVolume = level.volume;
-					};
-
-				for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
-				{
-					updateLevelAccum(info.askLevels[i], true, i == 0);
-					updateLevelAccum(info.bidLevels[i], false, i == 0);
-				}
-
-				for (auto it = stockData->orderPriceAccumMap.begin(); it != stockData->orderPriceAccumMap.end(); )
-				{
-					if (currentPrices.find(it->first) == currentPrices.end())
-						it = stockData->orderPriceAccumMap.erase(it);
-					else
-						++it;
-				}
-			}
 		}
+
 
 		// 港股实时行情补充：当新浪API未返回港股数据时，从腾讯API数据中提取
 		// 腾讯港股数据格式：r_hk~名称~代码~现价~昨收~今开~成交量~...~涨跌额~涨跌幅~最高~最低~...~成交额~...~换手率~...~振幅
