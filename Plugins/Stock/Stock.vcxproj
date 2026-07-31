@@ -272,6 +272,7 @@
     <ClInclude Include="StockIndicator.h" />
     <ClInclude Include="SmartSignalTestDlg.h" />
     <ClInclude Include="StockFetchThread.h" />
+    <ClInclude Include="TdxTcpClient.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="LocalHttpProxy.h" />
     <ClInclude Include="ManagerDialog.h" />
@@ -306,6 +307,7 @@
     <ClCompile Include="StockIndicator.cpp" />
     <ClCompile Include="SmartSignalTestDlg.cpp" />
     <ClCompile Include="StockFetchThread.cpp" />
+    <ClCompile Include="TdxTcpClient.cpp" />
     <ClCompile Include="ManagerDialog.cpp" />
     <ClCompile Include="NetFetch.cpp" />
     <ClCompile Include="OptionsDlg.cpp" />

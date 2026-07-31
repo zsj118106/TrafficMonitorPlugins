@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "OrderBookPanel.h"
 #include "ChartColors.h"
 #include "Common.h"
@@ -99,7 +99,8 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 	{
 		STOCK::Price price = stockInfo.askLevels[idx].price;
 		STOCK::Volume volume = stockInfo.askLevels[idx].volume / 100;
-		CString volumeStr = CCommon::FormatVolumeInt(volume);
+		CString volumeStr;
+		volumeStr.Format(_T("%lld"), static_cast<long long>(volume));
 		CString priceStr = stockInfo.IsETF() ? CCommon::FormatETFPrice(price) : CCommon::FormatFloat(price);
 		CString askTxt;
 		askTxt.Format(_T("S%d:%s"), idx + 1, priceStr);
@@ -109,7 +110,8 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		CString deltaStr;
 		if (delta != 0)
 		{
-			CString deltaVal = CCommon::FormatVolumeInt(std::abs(delta));
+			CString deltaVal;
+			deltaVal.Format(_T("%lld"), static_cast<long long>(std::abs(delta)));
 			deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 		}
 
@@ -143,7 +145,8 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 	{
 		STOCK::Price price = stockInfo.bidLevels[i].price;
 		STOCK::Volume volume = stockInfo.bidLevels[i].volume / 100;
-		CString volumeStr = CCommon::FormatVolumeInt(volume);
+		CString volumeStr;
+		volumeStr.Format(_T("%lld"), static_cast<long long>(volume));
 		CString priceStr = stockInfo.IsETF() ? CCommon::FormatETFPrice(price) : CCommon::FormatFloat(price);
 		CString bidTxt;
 		bidTxt.Format(_T("B%d:%s"), i + 1, priceStr);
@@ -153,7 +156,8 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		CString deltaStr;
 		if (delta != 0)
 		{
-			CString deltaVal = CCommon::FormatVolumeInt(std::abs(delta));
+			CString deltaVal;
+			deltaVal.Format(_T("%lld"), static_cast<long long>(std::abs(delta)));
 			deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 		}
 

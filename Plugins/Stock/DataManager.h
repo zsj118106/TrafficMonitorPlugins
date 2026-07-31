@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "StockDef.h"
 #include "StockDbManager.h"
+#include "TdxTcpClient.h"
 #include <mutex>
 
 using namespace STOCK;
@@ -76,7 +77,8 @@ public:
 	static int GetTradingMinute(int hour, int minute);
 
 	// 获取最新数据
-	void RequestRealtimeData();
+	void RequestRealtimeData(bool onlyNonAG = false);  // onlyNonAG=true时仅获取非A股数据
+	bool RequestRealtimeDataByTcp();  // 共享内存获取A股实时行情，返回是否成功
 	void RequestTimelineData(std::wstring stock_id);
 	void RequestKLineData(std::wstring stock_id, int days = 250);
 	void RequestMin5KLineData(std::wstring stock_id, int datalen = 250);
@@ -199,3 +201,6 @@ private:
 	// 值为失败截止时间戳（秒），0 表示未缓存
 	time_t m_eastmoney_fail_until{ 0 };
 };
+
+// 通达信共享内存行情客户端（全局实例，供工作线程直接访问）
+extern CTdxTcpClient g_tdx_client;

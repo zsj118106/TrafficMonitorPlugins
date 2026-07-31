@@ -3,6 +3,10 @@
 #include "Common.h"
 #include "Stock.h"
 #include <vector>
+
+// 通达信TCP行情客户端全局实例
+CTdxTcpClient g_tdx_client;
+
 #include <sstream>
 #include "../utilities/IniHelper.h"
 #include <iomanip>
@@ -435,14 +439,38 @@ void CDataManager::LoadTodayInnerOuterSnapshots()
 		stockData->ClearVolumePools();
 
 		auto snapshots = m_db_mgr.LoadInnerOuterSnapshots(code, startTime);
-		for (const auto& snap : snapshots)
+		// 数据库快照为10秒间隔，需按2秒间隔线性插值填充，使采样池数据连续
+		for (size_t si = 0; si < snapshots.size(); ++si)
 		{
-			time_t timestamp = std::get<0>(snap);
-			STOCK::Volume innerVolume = std::get<1>(snap);
-			STOCK::Volume outerVolume = std::get<2>(snap);
+			time_t timestamp = std::get<0>(snapshots[si]);
+			STOCK::Volume innerVolume = std::get<1>(snapshots[si]);
+			STOCK::Volume outerVolume = std::get<2>(snapshots[si]);
 			int tradingMinute = GetTradingMinute(timestamp);
 			if (tradingMinute >= 0)
+			{
+				// 先入池当前快照
 				stockData->AddVolumeSample(timestamp, innerVolume, outerVolume);
+				// 如果有下一条快照，在两者之间按2秒间隔插值填充
+				if (si + 1 < snapshots.size())
+				{
+					time_t nextTimestamp = std::get<0>(snapshots[si + 1]);
+					STOCK::Volume nextInner = std::get<1>(snapshots[si + 1]);
+					STOCK::Volume nextOuter = std::get<2>(snapshots[si + 1]);
+					time_t gap = nextTimestamp - timestamp;
+					if (gap > 2 && gap <= 600)  // 间隔合理（2秒~10分钟）才插值
+					{
+						int steps = static_cast<int>((gap - 2) / 2);  // 中间需要插入的点数
+						for (int k = 1; k <= steps; ++k)
+						{
+							time_t t = timestamp + k * 2;
+							double frac = static_cast<double>(k * 2) / gap;
+							STOCK::Volume interpInner = innerVolume + static_cast<STOCK::Volume>((nextInner - innerVolume) * frac);
+							STOCK::Volume interpOuter = outerVolume + static_cast<STOCK::Volume>((nextOuter - outerVolume) * frac);
+							stockData->AddVolumeSample(t, interpInner, interpOuter);
+						}
+					}
+				}
+			}
 			stockData->info.innerVolume = innerVolume;
 			stockData->info.outerVolume = outerVolume;
 		}
@@ -1260,10 +1288,19 @@ static bool CalculateChipDistribution(const std::vector<ChipKLinePoint>& klines,
 	return true;
 }
 
-void CDataManager::RequestRealtimeData()
+void CDataManager::RequestRealtimeData(bool onlyNonAG)
 {
-	TRACE(L"RequestRealtimeData...\n");
+	TRACE(L"RequestRealtimeData... (onlyNonAG=%d)\n", onlyNonAG ? 1 : 0);
 	std::vector<std::wstring> codes = m_setting_data.m_stock_codes;
+
+	// onlyNonAG模式：仅获取非A股代码（港股等），A股由共享内存提供
+	if (onlyNonAG)
+	{
+		codes.erase(std::remove_if(codes.begin(), codes.end(),
+			[](const std::wstring& code) {
+				return code.find(kSH) == 0 || code.find(kSZ) == 0 || code.find(kBJ) == 0;
+			}), codes.end());
+	}
 
 	// 所有股票统一用新浪API获取基本行情（名称、价格、五档等）
 	// 腾讯API对部分代理IP会返回"访问被禁止"，因此不再依赖腾讯API作为A股主数据源
@@ -1286,7 +1323,90 @@ void CDataManager::RequestRealtimeData()
 
 	// 尝试用腾讯API获取内外盘+IOPV等扩展数据（失败不影响基本行情）
 	// 腾讯API对代理IP可能返回"访问被禁止"，此时内外盘数据无法获取
-	RequestInnerOuterData(true);
+	RequestInnerOuterData(!onlyNonAG);
+}
+
+bool CDataManager::RequestRealtimeDataByTcp()
+{
+	// 确保共享内存已打开
+	if (!g_tdx_client.IsConnected())
+	{
+		if (!g_tdx_client.Connect())
+		{
+			CCommon::WriteLog(L"[TDX] 共享内存打开失败（Python端未启动？）", m_log_path.c_str());
+			return false;
+		}
+		CCommon::WriteLog(L"[TDX] 共享内存连接成功", m_log_path.c_str());
+	}
+
+	// 读取共享内存中的行情数据
+	std::vector<QuoteItem> items;
+	unsigned int seq = g_tdx_client.ReadQuotes(items);
+	if (items.empty())
+		return false;  // 无有效数据
+
+	// 将共享内存数据写入stockMarket
+	int validCount = 0;
+	for (const auto& item : items)
+	{
+		// 跳过无效数据
+		if (item.price <= 0.001)
+			continue;
+
+		// code已包含市场前缀（如sh000001、sz000001），直接转为wstring
+		std::wstring code = CCommon::StrToUnicode(item.code);
+
+		auto stockData = stockMarket.getStock(code);
+		if (!stockData)
+			continue;
+
+		StockInfo& info = stockData->info;
+		info.code = code;
+		info.is_ok = true;
+
+		// 首次启动时更新股票名称（displayName为空时才从共享内存写入）
+		if (info.displayName.empty() && item.name[0] != '\0')
+			info.displayName = CCommon::StrToUnicode(item.name);
+
+		bool isEtf = info.IsETF();
+		// 更新价格数据
+		info.prevClosePrice = (Price)(isEtf ? item.pre_close / 10 : item.pre_close);
+		info.openPrice = (Price)(isEtf ? item.open / 10 : item.open);
+		info.highPrice = (Price)(isEtf ? item.high / 10 : item.high);
+		info.lowPrice = (Price)(isEtf ? item.low / 10 : item.low);
+		info.currentPrice = (Price)(isEtf ? item.price / 10 : item.price);
+
+		// 更新五档数据
+		info.bidLevels[0] = OrderLevel((Price)(isEtf ? item.bid1 / 10 : item.bid1), (Volume)item.bid_vol1*100);
+		info.bidLevels[1] = OrderLevel((Price)(isEtf ? item.bid2 / 10 : item.bid2), (Volume)item.bid_vol2*100);
+		info.bidLevels[2] = OrderLevel((Price)(isEtf ? item.bid3 / 10 : item.bid3), (Volume)item.bid_vol3*100);
+		info.bidLevels[3] = OrderLevel((Price)(isEtf ? item.bid4 / 10 : item.bid4), (Volume)item.bid_vol4*100);
+		info.bidLevels[4] = OrderLevel((Price)(isEtf ? item.bid5 / 10 : item.bid5), (Volume)item.bid_vol5*100);
+		info.askLevels[0] = OrderLevel((Price)(isEtf ? item.ask1 / 10 : item.ask1), (Volume)item.ask_vol1*100);
+		info.askLevels[1] = OrderLevel((Price)(isEtf ? item.ask2 / 10 : item.ask2), (Volume)item.ask_vol2*100);	
+		info.askLevels[2] = OrderLevel((Price)(isEtf ? item.ask3 / 10 : item.ask3), (Volume)item.ask_vol3*100);
+		info.askLevels[3] = OrderLevel((Price)(isEtf ? item.ask4 / 10 : item.ask4), (Volume)item.ask_vol4*100);
+		info.askLevels[4] = OrderLevel((Price)(isEtf ? item.ask5 / 10 : item.ask5), (Volume)item.ask_vol5*100);
+
+		// 更新成交量/额（共享内存中vol已经是手）
+		info.volume = (Volume)item.vol * 100;       // 手→股
+		info.turnover = (Amount)item.amount;
+		info.innerVolume = (Volume)item.inner_vol * 100; // 手→股
+		info.outerVolume = (Volume)item.outer_vol * 100; // 手→股
+
+		// 更新内外盘采样（净比计算）
+		stockData->UpdateVolumeSample();
+
+		// 更新五档挂单变化量（+N/-N）
+		stockData->UpdateOrderPriceAccum();
+
+		// 更新显示字段（价格/涨跌幅/涨跌额）
+		info.UpdateDisplayFields();
+
+		validCount++;
+	}
+
+	return validCount > 0;
 }
 
 void CDataManager::RequestInnerOuterData(bool includeAG)
@@ -1688,7 +1808,7 @@ bool CDataManager::RequestChipDistributionData(std::wstring stock_id)
 							if (yyjson_is_int(val)) return static_cast<double>(yyjson_get_int(val));
 							if (yyjson_is_str(val)) return atof(yyjson_get_str(val));
 							return 0.0;
-						};
+							};
 
 						yyjson_val* item;
 						yyjson_arr_iter iter;

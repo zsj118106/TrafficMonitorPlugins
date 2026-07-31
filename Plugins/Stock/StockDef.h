@@ -356,6 +356,7 @@ namespace STOCK
 		}
 
 		void Load(std::wstring key, std::vector<std::string> data);
+		void UpdateDisplayFields();  // 更新displayPrice/displayFluctuation等显示字段
 		void LoadMG(std::vector<std::string> data, size_t size);
 		void LoadAG(std::vector<std::string> data, size_t size);
 		void LoadSH(std::vector<std::string> data, size_t size);
@@ -637,24 +638,27 @@ namespace STOCK
 			}
 		};
 
-		VolumePool volumePool;  // 缓存池（240条=20分钟5秒采样）
-		time_t lastSampleTime{ 0 }; // 上次采样时间（5秒间隔去重）
+		VolumePool volumePool;  // 缓存池（600条=20分钟2秒采样）
+		time_t lastSampleTime{ 0 }; // 上次采样时间（2秒间隔去重）
+		time_t lastSaveTime{ 0 };   // 上次持久化时间（5秒间隔）
 
 		void InitVolumePools()
 		{
-			volumePool.Init(240);
+			volumePool.Init(600);
 			lastSampleTime = 0;
+			lastSaveTime = 0;
 		}
 		void ClearVolumePools()
 		{
 			volumePool.Clear();
 			lastSampleTime = 0;
+			lastSaveTime = 0;
 		}
-		// 添加5秒采样数据
+		// 添加2秒采样数据，返回是否入池
 		bool AddVolumeSample(time_t t, Volume inner, Volume outer)
 		{
-			// 5秒间隔去重
-			time_t sampleTime = t - t % 5;
+			// 2秒间隔去重
+			time_t sampleTime = t - t % 2;
 			if (sampleTime <= 0 || sampleTime == lastSampleTime)
 				return false;
 			lastSampleTime = sampleTime;
@@ -662,6 +666,19 @@ namespace STOCK
 			volumePool.Push({ sampleTime, inner, outer });
 			return true;
 		}
+		// 判断是否需要持久化（10秒间隔）
+		bool ShouldSaveSnapshot(time_t t)
+		{
+			time_t saveTime = t - t % 10;
+			if (saveTime <= 0 || saveTime == lastSaveTime)
+				return false;
+			lastSaveTime = saveTime;
+			return true;
+		}
+
+		// 更新内外盘采样并持久化（与数据来源解耦，任何数据源更新后都应调用）
+		void UpdateVolumeSample();
+		void UpdateOrderPriceAccum();  // 更新五档挂单变化量（+N/-N）
 
 		// 从缓存池获取净差和净比（minutes: 1/5/10/20）
 		// 不足目标条数时有多少根就计算多少根
@@ -670,7 +687,7 @@ namespace STOCK
 			if (volumePool.count < 2)
 				return false;
 
-			int sampleCount = min(minutes * 12, volumePool.count);
+			int sampleCount = min(minutes * 30, volumePool.count);
 			const VolumeSample* newest = volumePool.FromEnd(0);
 			const VolumeSample* oldest = volumePool.FromEnd(sampleCount - 1);
 			if (!newest || !oldest)
@@ -693,7 +710,7 @@ namespace STOCK
 			if (volumePool.count < 3)
 				return false;
 
-			int sampleCount = min(minutes * 12, volumePool.count - 1);
+			int sampleCount = min(minutes * 30, volumePool.count - 1);
 			const VolumeSample* prevNewest = volumePool.FromEnd(1);
 			const VolumeSample* prevOldest = volumePool.FromEnd(sampleCount);
 			if (!prevNewest || !prevOldest)

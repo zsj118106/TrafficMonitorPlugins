@@ -6,6 +6,7 @@
 #include "FloatingWnd.h"
 #include <afxwin.h>
 #include <afxinet.h>
+#include <shlwapi.h>
 
 // 图表数据类型索引（与 m_chart_last_fetch 数组对应）
 // 按间隔从短到长排列，遍历时从前往后即可保证短间隔任务优先
@@ -34,6 +35,57 @@ CStockFetchThread::~CStockFetchThread()
 	Stop();
 }
 
+void CStockFetchThread::StartExternalProcess()
+{
+	if (m_hExternalProcess != nullptr)
+		return;
+
+	// 获取当前DLL所在目录
+	wchar_t dllPath[MAX_PATH]{};
+	HMODULE hMod = nullptr;
+	if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		(LPCWSTR)&CStockFetchThread::Instance, &hMod))
+		return;
+	GetModuleFileNameW(hMod, dllPath, MAX_PATH);
+	// 去掉文件名，保留目录
+	PathRemoveFileSpecW(dllPath);
+
+	// 拼接 getPrice.exe 路径
+	std::wstring exePath = std::wstring(dllPath) + L"\\getPrice.exe";
+	if (!PathFileExistsW(exePath.c_str()))
+		return;
+
+	STARTUPINFOW si{};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi{};
+	// 创建进程，隐藏窗口
+	if (CreateProcessW(exePath.c_str(), nullptr, nullptr, nullptr, FALSE,
+		0, nullptr, dllPath, &si, &pi))
+	{
+		m_hExternalProcess = pi.hProcess;
+		m_dwExternalPid = pi.dwProcessId;
+		CloseHandle(pi.hThread);
+	}
+}
+
+void CStockFetchThread::StopExternalProcess()
+{
+	if (m_hExternalProcess == nullptr)
+		return;
+
+	// 先尝试优雅关闭
+	HANDLE hProcess = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, m_dwExternalPid);
+	if (hProcess != nullptr)
+	{
+		TerminateProcess(hProcess, 0);
+		WaitForSingleObject(hProcess, 2000);
+		CloseHandle(hProcess);
+	}
+	CloseHandle(m_hExternalProcess);
+	m_hExternalProcess = nullptr;
+	m_dwExternalPid = 0;
+}
+
 void CStockFetchThread::Start()
 {
 	if (m_started.exchange(true))
@@ -42,6 +94,9 @@ void CStockFetchThread::Start()
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
 
 	m_stopping = false;
+
+	// 启动外部共享内存程序
+	StartExternalProcess();
 
 	// 启动图表线程（即时任务/集合竞价/后台任务/图表定时获取）
 	CWinThread* pThread = AfxBeginThread(ThreadProc, this, THREAD_PRIORITY_NORMAL, 0, CREATE_SUSPENDED);
@@ -115,6 +170,9 @@ void CStockFetchThread::Stop()
 	delete m_realtime_pThread;
 	m_realtime_pThread = nullptr;
 	m_realtime_last_fetch = 0;
+
+	// 关闭外部共享内存程序
+	StopExternalProcess();
 }
 
 void CStockFetchThread::PostTask(Task task)
@@ -396,7 +454,17 @@ void CStockFetchThread::RunRealtime()
 		bool needFetch = false;
 		time_t waitSec = 1;  // 默认1秒后重新检查
 
-		if (bTradingSession || bFullDay)
+		// 共享内存模式：2秒间隔，不受交易时段限制
+		if (g_tdx_client.IsConnected())
+		{
+			time_t interval = 2;
+			time_t elapsed = time(nullptr) - m_realtime_last_fetch;
+			if (elapsed >= interval)
+				needFetch = true;
+			else
+				waitSec = interval - elapsed;
+		}
+		else if (bTradingSession || bFullDay)
 		{
 			if (g_data.m_setting_data.m_stock_codes.empty())
 			{
@@ -423,21 +491,45 @@ void CStockFetchThread::RunRealtime()
 		{
 			if (m_stopping.load())
 				return;
-			try
-			{
-				g_data.RequestRealtimeData();
-			}
-			catch (CInternetException* e)
-			{
-				e->Delete();
-			}
-			catch (...)
-			{
-			}
-			m_realtime_last_fetch = time(nullptr);
 
-			// 数据获取完成后通知浮动窗口刷新
-			Stock::Instance().NotifyFloatingWndUpdate();
+			// 1. 优先尝试共享内存获取A股数据（零延迟）
+			bool tcpOk = false;
+			if (g_tdx_client.IsConnected())
+			{
+				try
+				{
+					tcpOk = g_data.RequestRealtimeDataByTcp();
+				}
+				catch (...)
+				{
+					tcpOk = false;
+					CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
+				}
+			}
+
+			// 共享内存获取成功后立即刷新UI，并更新时间戳
+			// 这样下一次2秒间隔从共享内存获取时刻算起，不被HTTP阻塞
+			if (tcpOk)
+			{
+				Stock::Instance().NotifyFloatingWndUpdate();
+				m_realtime_last_fetch = time(nullptr);
+			}
+
+			// 2. HTTP补充港股数据，投递到图表线程异步执行，不阻塞共享内存循环
+			//    如果共享内存获取A股成功，HTTP只更新非A股数据（港股等）
+			//    如果共享内存获取失败，HTTP更新所有数据（含A股）
+			if (bTradingSession || bFullDay || !tcpOk)
+			{
+				PostBackgroundTask([tcpOk]() {
+					g_data.RequestRealtimeData(tcpOk);
+					Stock::Instance().NotifyFloatingWndUpdate();
+				});
+			}
+
+			if (!tcpOk)
+			{
+				m_realtime_last_fetch = time(nullptr);
+			}
 
 			continue;  // 获取完成后立即检查是否需要下一次
 		}

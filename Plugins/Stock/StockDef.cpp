@@ -80,41 +80,60 @@ void STOCK::StockMarket::LoadRealtimeDataByJson(std::string json, const std::vec
 
 		stockData->info.Load(key, data_arr);
 
-		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量
-		// 仅新浪API（主数据源）计算delta并更新prevVolume
-		// 腾讯API不重复计算，避免两个API数据相同时delta被抵消
+		// 更新五档挂单变化量
+		stockData->UpdateOrderPriceAccum();
+	}
+}
+
+void STOCK::StockData::UpdateVolumeSample()
+{
+	if (info.innerVolume <= 0 && info.outerVolume <= 0)
+		return;
+	time_t now;
+	time(&now);
+	int tradingMinute = CDataManager::GetTradingMinute(now);
+	if (tradingMinute < 0)
+		return;
+	if (AddVolumeSample(now, info.innerVolume, info.outerVolume))
+	{
+		if (ShouldSaveSnapshot(now))
 		{
-			std::map<Price, OrderPriceAccum> currentPrices;
-			auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide) {
-				if (level.price <= 0)
-					return;
-
-				currentPrices[level.price] = { level.volume, 0, isAskSide };
-				auto it = stockData->orderPriceAccumMap.find(level.price);
-				if (it == stockData->orderPriceAccumMap.end() || it->second.isAskSide != isAskSide)
-				{
-					stockData->orderPriceAccumMap[level.price] = { level.volume, 0, isAskSide };
-					return;
-				}
-
-				it->second.deltaVolume += level.volume - it->second.prevVolume;
-				it->second.prevVolume = level.volume;
-				};
-
-			for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
-			{
-				updateLevelAccum(stockData->info.askLevels[i], true);
-				updateLevelAccum(stockData->info.bidLevels[i], false);
-			}
-
-			for (auto it = stockData->orderPriceAccumMap.begin(); it != stockData->orderPriceAccumMap.end(); )
-			{
-				if (currentPrices.find(it->first) == currentPrices.end())
-					it = stockData->orderPriceAccumMap.erase(it);
-				else
-					++it;
-			}
+			g_data.SaveInnerOuterSnapshot(info.code, now, info.innerVolume, info.outerVolume);
 		}
+	}
+}
+
+void STOCK::StockData::UpdateOrderPriceAccum()
+{
+	std::map<Price, OrderPriceAccum> currentPrices;
+	auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide) {
+		if (level.price <= 0)
+			return;
+
+		currentPrices[level.price] = { level.volume, 0, isAskSide };
+		auto it = orderPriceAccumMap.find(level.price);
+		if (it == orderPriceAccumMap.end() || it->second.isAskSide != isAskSide)
+		{
+			orderPriceAccumMap[level.price] = { level.volume, 0, isAskSide };
+			return;
+		}
+
+		it->second.deltaVolume += level.volume - it->second.prevVolume;
+		it->second.prevVolume = level.volume;
+	};
+
+	for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
+	{
+		updateLevelAccum(info.askLevels[i], true);
+		updateLevelAccum(info.bidLevels[i], false);
+	}
+
+	for (auto it = orderPriceAccumMap.begin(); it != orderPriceAccumMap.end(); )
+	{
+		if (currentPrices.find(it->first) == currentPrices.end())
+			it = orderPriceAccumMap.erase(it);
+		else
+			++it;
 	}
 }
 
@@ -160,16 +179,7 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 			{
 				stockData->info.innerVolume = innerVolume;
 				stockData->info.outerVolume = outerVolume;
-				time_t now;
-				time(&now);
-				int tradingMinute = CDataManager::GetTradingMinute(now);
-				if (tradingMinute >= 0)
-				{
-					if (stockData->AddVolumeSample(now, stockData->info.innerVolume, stockData->info.outerVolume))
-					{
-						g_data.SaveInnerOuterSnapshot(key, now, stockData->info.innerVolume, stockData->info.outerVolume);
-					}
-				}
+				stockData->UpdateVolumeSample();
 			}
 		}
 		if (data_arr.size() >= 39 && !data_arr[38].empty())
@@ -231,24 +241,9 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 				info.turnover = { convert<Price>(data_arr[36]) };
 
 			// 计算涨跌显示
-			if (info.currentPrice > 0 && info.prevClosePrice > 0)
-			{
-				CString priceStr = CCommon::FormatFloat(info.currentPrice);
-				info.displayPrice = std::wstring(priceStr.GetString());
+			info.UpdateDisplayFields();
 
-				char buff[32];
-				float diff = info.currentPrice - info.prevClosePrice;
-				float change = diff / info.prevClosePrice * 100;
-				if (diff > 0)
-					sprintf_s(buff, "(+%g) ", diff);
-				else
-					sprintf_s(buff, "(%g) ", diff);
-				info.displayFluctuationDiff = CCommon::StrToUnicode(buff);
-				sprintf_s(buff, "%.2f%%", std::fabs(change));
-				info.displayFluctuation = CCommon::StrToUnicode(buff);
-
-				info.is_ok = true;
-			}
+			info.is_ok = true;
 		}
 	}
 }
@@ -536,6 +531,27 @@ void STOCK::StockMarket::LoadCallAuctionData(std::string data)
 	}
 }
 
+void STOCK::StockInfo::UpdateDisplayFields()
+{
+	if (currentPrice > 0 && prevClosePrice > 0)
+	{
+		CString priceStr = IsETF() ? CCommon::FormatETFPrice(currentPrice) : CCommon::FormatFloat(currentPrice);
+		displayPrice = std::wstring(priceStr.GetString());
+
+		char buff[32];
+		float diff = currentPrice - prevClosePrice;
+		float change = diff / prevClosePrice * 100;
+		if (diff > 0)
+			sprintf_s(buff, "(+%g) ", diff);
+		else
+			sprintf_s(buff, "(%g) ", diff);
+		displayFluctuationDiff = CCommon::StrToUnicode(buff);
+
+		sprintf_s(buff, "%.2f%%", std::fabs(change));
+		displayFluctuation = CCommon::StrToUnicode(buff);
+	}
+}
+
 void STOCK::StockInfo::Load(std::wstring key, std::vector<std::string> data_arr)
 {
 	size_t data_size = static_cast<size_t>(data_arr.size());
@@ -569,27 +585,7 @@ void STOCK::StockInfo::Load(std::wstring key, std::vector<std::string> data_arr)
 		LoadHF(data_arr, data_size);
 	}
 
-	if (currentPrice > 0 && prevClosePrice > 0)
-	{
-		CString priceStr = IsETF() ? CCommon::FormatETFPrice(currentPrice) : CCommon::FormatFloat(currentPrice);
-		displayPrice = std::wstring(priceStr.GetString());
-
-		char buff[32];
-		float diff = currentPrice - prevClosePrice;
-		float change = diff / prevClosePrice * 100;
-		if (diff > 0)
-		{
-			sprintf_s(buff, "(+%g) ", diff);
-		}
-		else
-		{
-			sprintf_s(buff, "(%g) ", diff);
-		}
-		displayFluctuationDiff = CCommon::StrToUnicode(buff);
-
-		sprintf_s(buff, "%.2f%%", std::fabs(change));
-		displayFluctuation = CCommon::StrToUnicode(buff);
-	}
+	UpdateDisplayFields();
 
 	// IOPV 溢折率自动计算
 	if (iopv > 0)

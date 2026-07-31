@@ -25,6 +25,11 @@ public:
 	// 通知所有工作线程退出并等待其结束（在主线程退出前调用）
 	void Stop();
 
+	// 启动外部共享内存程序（getPrice.exe）
+	void StartExternalProcess();
+	// 关闭外部共享内存程序
+	void StopExternalProcess();
+
 	// 投递一个常规任务到工作线程（用于日K线等一次性请求）
 	// 线程未启动、正在退出或当前正忙于执行同类任务时，忽略本次请求
 	void PostTask(Task task);
@@ -99,4 +104,8 @@ private:
 	// 实时行情线程
 	HANDLE m_realtime_thread_handle{ nullptr };
 	class CWinThread* m_realtime_pThread{ nullptr };
+
+	// 外部共享内存进程
+	HANDLE m_hExternalProcess{ nullptr };
+	DWORD m_dwExternalPid{ 0 };
 };
