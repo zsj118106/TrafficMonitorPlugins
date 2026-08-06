@@ -457,6 +457,61 @@ namespace STOCK
 		bool isAskSide{ true };       // true=卖方，false=买方
 	};
 
+	// 内外盘5秒快照环形缓存池（20分钟=240条）
+		// 1分钟取最新12条, 5分钟取最新60条, 10分钟取最新120条, 20分钟取最新240条
+	struct VolumeSample {
+		time_t timestamp;       // 真实时间戳
+		Volume innerVolume;
+		Volume outerVolume;
+	};
+
+	struct VolumePool {
+		std::vector<VolumeSample> samples;
+		int head{ 0 };       // 环形缓冲区头指针（最旧数据位置）
+		int count{ 0 };      // 当前有效数据量
+		int capacity{ 0 };   // 缓冲区容量
+		void Init(int cap)
+		{
+			capacity = cap;
+			samples.resize(capacity);
+			head = 0;
+			count = 0;
+		}
+		void Clear()
+		{
+			head = 0;
+			count = 0;
+		}
+		void Push(const VolumeSample& sample)
+		{
+			if (count < capacity)
+			{
+				samples[count] = sample;
+				count++;
+			}
+			else
+			{
+				samples[head] = sample;
+				head = (head + 1) % capacity;
+			}
+		}
+		// 获取最新样本
+		const VolumeSample* Newest() const
+		{
+			if (count == 0) return nullptr;
+			int idx = (head + count - 1) % capacity;
+			return &samples[idx];
+		}
+		// 获取倒数第N个样本（0=最新，1=次新，...）
+		const VolumeSample* FromEnd(int n) const
+		{
+			if (n < 0 || n >= count) return nullptr;
+			int idx = (head + count - 1 - n) % capacity;
+			if (idx < 0) idx += capacity;
+			return &samples[idx];
+		}
+	};
+
 	// 股票数据结构
 	class StockData
 	{
@@ -583,74 +638,22 @@ namespace STOCK
 		Price lastBid1Price{ 0 };    // 上次买一价格（变化时清零）
 		DWORD lastTickTime{ 0 };     // 上次计时的时间戳
 
-		// 内外盘5秒快照环形缓存池（20分钟=240条）
-		// 1分钟取最新12条, 5分钟取最新60条, 10分钟取最新120条, 20分钟取最新240条
-		struct VolumeSample {
-			time_t timestamp;       // 真实时间戳
-			Volume innerVolume;
-			Volume outerVolume;
-		};
-
-		struct VolumePool {
-			std::vector<VolumeSample> samples;
-			int head{ 0 };       // 环形缓冲区头指针（最旧数据位置）
-			int count{ 0 };      // 当前有效数据量
-			int capacity{ 0 };   // 缓冲区容量
-			void Init(int cap)
-			{
-				capacity = cap;
-				samples.resize(capacity);
-				head = 0;
-				count = 0;
-			}
-			void Clear()
-			{
-				head = 0;
-				count = 0;
-			}
-			void Push(const VolumeSample& sample)
-			{
-				if (count < capacity)
-				{
-					samples[count] = sample;
-					count++;
-				}
-				else
-				{
-					samples[head] = sample;
-					head = (head + 1) % capacity;
-				}
-			}
-			// 获取最新样本
-			const VolumeSample* Newest() const
-			{
-				if (count == 0) return nullptr;
-				int idx = (head + count - 1) % capacity;
-				return &samples[idx];
-			}
-			// 获取倒数第N个样本（0=最新，1=次新，...）
-			const VolumeSample* FromEnd(int n) const
-			{
-				if (n < 0 || n >= count) return nullptr;
-				int idx = (head + count - 1 - n) % capacity;
-				if (idx < 0) idx += capacity;
-				return &samples[idx];
-			}
-		};
-
-		VolumePool volumePool;  // 缓存池（600条=20分钟2秒采样）
+		VolumePool secVolumePool;  // 秒级缓存池（30条=1分钟2秒采样）
+		VolumePool minVolumePool;  // 分钟缓存池（30条=30分钟1分采样）
 		time_t lastSampleTime{ 0 }; // 上次采样时间（2秒间隔去重）
 		time_t lastSaveTime{ 0 };   // 上次持久化时间（5秒间隔）
 
 		void InitVolumePools()
 		{
-			volumePool.Init(600);
+			secVolumePool.Init(30);
+			minVolumePool.Init(30);
 			lastSampleTime = 0;
 			lastSaveTime = 0;
 		}
 		void ClearVolumePools()
 		{
-			volumePool.Clear();
+			secVolumePool.Clear();
+			minVolumePool.Clear();
 			lastSampleTime = 0;
 			lastSaveTime = 0;
 		}
@@ -663,7 +666,7 @@ namespace STOCK
 				return false;
 			lastSampleTime = sampleTime;
 
-			volumePool.Push({ sampleTime, inner, outer });
+			secVolumePool.Push({ sampleTime, inner, outer });
 			return true;
 		}
 		// 判断是否需要持久化（10秒间隔）
@@ -684,12 +687,12 @@ namespace STOCK
 		// 不足目标条数时有多少根就计算多少根
 		bool GetInnerOuterNetDiff(int minutes, Volume& diff, double& ratio) const
 		{
-			if (volumePool.count < 2)
+			if (secVolumePool.count < 2)
 				return false;
 
-			int sampleCount = min(minutes * 30, volumePool.count);
-			const VolumeSample* newest = volumePool.FromEnd(0);
-			const VolumeSample* oldest = volumePool.FromEnd(sampleCount - 1);
+			int sampleCount = min(minutes * 30, secVolumePool.count);
+			const VolumeSample* newest = secVolumePool.FromEnd(0);
+			const VolumeSample* oldest = secVolumePool.FromEnd(sampleCount - 1);
 			if (!newest || !oldest)
 				return false;
 
@@ -707,12 +710,12 @@ namespace STOCK
 		// 获取前一次净差
 		bool GetPreviousInnerOuterNetDiff(int minutes, Volume& diff, double& ratio) const
 		{
-			if (volumePool.count < 3)
+			if (secVolumePool.count < 3)
 				return false;
 
-			int sampleCount = min(minutes * 30, volumePool.count - 1);
-			const VolumeSample* prevNewest = volumePool.FromEnd(1);
-			const VolumeSample* prevOldest = volumePool.FromEnd(sampleCount);
+			int sampleCount = min(minutes * 30, secVolumePool.count - 1);
+			const VolumeSample* prevNewest = secVolumePool.FromEnd(1);
+			const VolumeSample* prevOldest = secVolumePool.FromEnd(sampleCount);
 			if (!prevNewest || !prevOldest)
 				return false;
 
@@ -729,7 +732,7 @@ namespace STOCK
 
 		bool GetPreviousInnerOuterTotalRatio(double& ratio) const
 		{
-			const VolumeSample* prev = volumePool.FromEnd(1);
+			const VolumeSample* prev = secVolumePool.FromEnd(1);
 			if (!prev) return false;
 			Volume total = prev->innerVolume + prev->outerVolume;
 			if (total <= 0) return false;
@@ -742,14 +745,14 @@ namespace STOCK
 		bool GetRecentNetRatios(int count, std::vector<double>& ratios) const
 		{
 			ratios.clear();
-			if (volumePool.count < count + 1)
+			if (secVolumePool.count < count + 1)
 				return false;
 			ratios.resize(count);
 			for (int i = 0; i < count; i++)
 			{
 				// 从新到旧：FromEnd(i+1) 和 FromEnd(i)
-				const VolumeSample* older = volumePool.FromEnd(i + 1);
-				const VolumeSample* newer = volumePool.FromEnd(i);
+				const VolumeSample* older = secVolumePool.FromEnd(i + 1);
+				const VolumeSample* newer = secVolumePool.FromEnd(i);
 				if (!older || !newer)
 				{
 					ratios.clear();

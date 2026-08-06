@@ -21,6 +21,7 @@
 #define COLOR_LIGHT_BLUE          RGB(210, 235, 255)  // 淡蓝色背景
 #define COLOR_LIGHT_GREEN         RGB(210, 245, 210)  // 淡绿色背景
 #define COLOR_GOLDEN              RGB(200, 150, 0)    // 黄金色
+#define COLOR_DARK_ORANGE         RGB(199, 110, 0)    // 暗橙色
 
 // 涨幅/盈亏背景颜色
 #define COLOR_BG_RED              RGB(220, 80, 80)    // >= 5% 红色背景

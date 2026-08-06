@@ -108,4 +108,6 @@ private:
 	// 外部共享内存进程
 	HANDLE m_hExternalProcess{ nullptr };
 	DWORD m_dwExternalPid{ 0 };
+	HANDLE m_hJob{ nullptr };		// Job Object，确保子进程随主进程一起终止
+	HANDLE m_hStartMutex{ nullptr };	// 跨进程互斥体，防止多个TM进程重复启动getPrice.exe
 };

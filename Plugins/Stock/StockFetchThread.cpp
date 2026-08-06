@@ -38,33 +38,88 @@ CStockFetchThread::~CStockFetchThread()
 void CStockFetchThread::StartExternalProcess()
 {
 	if (m_hExternalProcess != nullptr)
+	{
+		CCommon::WriteLog(L"[ExternalProcess] 已有进程在运行，跳过", g_data.m_log_path.c_str());
 		return;
+	}
+
+	// 跨进程互斥：TrafficMonitor 可能有多个进程加载插件，确保只启动一次 getPrice.exe
+	HANDLE hMutex = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\StockGetPriceStartMutex");
+	if (hMutex != nullptr)
+	{
+		// 互斥体已存在，说明另一个进程已经启动了 getPrice.exe
+		CCommon::WriteLog(L"[ExternalProcess] 其他进程已启动getPrice，跳过", g_data.m_log_path.c_str());
+		CloseHandle(hMutex);
+		return;
+	}
+
+	// 创建互斥体（首次创建），用于标记 getPrice.exe 已被某个进程启动
+	hMutex = CreateMutexW(nullptr, TRUE, L"Local\\StockGetPriceStartMutex");
+	if (hMutex == nullptr)
+	{
+		CCommon::WriteLog(L"[ExternalProcess] 创建互斥体失败，跳过", g_data.m_log_path.c_str());
+		return;
+	}
+	// 保存互斥体句柄，Stop 时释放
+	m_hStartMutex = hMutex;
 
 	// 获取当前DLL所在目录
 	wchar_t dllPath[MAX_PATH]{};
 	HMODULE hMod = nullptr;
 	if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 		(LPCWSTR)&CStockFetchThread::Instance, &hMod))
+	{
+		CCommon::WriteLog(L"[ExternalProcess] GetModuleHandleEx 失败", g_data.m_log_path.c_str());
 		return;
+	}
 	GetModuleFileNameW(hMod, dllPath, MAX_PATH);
 	// 去掉文件名，保留目录
 	PathRemoveFileSpecW(dllPath);
 
 	// 拼接 getPrice.exe 路径
 	std::wstring exePath = std::wstring(dllPath) + L"\\getPrice.exe";
+
 	if (!PathFileExistsW(exePath.c_str()))
+	{
+		CCommon::WriteLog(L"[ExternalProcess] getPrice.exe 不存在，跳过", g_data.m_log_path.c_str());
 		return;
+	}
+
+	// 创建 Job Object，确保 PyInstaller 子进程随主进程一起终止
+	m_hJob = CreateJobObjectW(nullptr, nullptr);
+	if (m_hJob == nullptr)
+	{
+		wchar_t logBuf[128]{};
+		swprintf_s(logBuf, L"[ExternalProcess] CreateJobObject 失败, 错误码=%u", GetLastError());
+		CCommon::WriteLog(logBuf, g_data.m_log_path.c_str());
+		return;
+	}
+	JOBOBJECT_BASIC_LIMIT_INFORMATION jbli{};
+	jbli.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	SetInformationJobObject(m_hJob, JobObjectBasicLimitInformation, &jbli, sizeof(jbli));
 
 	STARTUPINFOW si{};
 	si.cb = sizeof(si);
 	PROCESS_INFORMATION pi{};
-	// 创建进程，隐藏窗口
+	// CREATE_NO_WINDOW 抑制控制台窗口，CREATE_SUSPENDED 先挂起以便加入Job后再恢复
 	if (CreateProcessW(exePath.c_str(), nullptr, nullptr, nullptr, FALSE,
-		0, nullptr, dllPath, &si, &pi))
+		CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, dllPath, &si, &pi))
 	{
+		// 将主进程加入 Job，PyInstaller 创建的子进程会自动继承 Job
+		AssignProcessToJobObject(m_hJob, pi.hProcess);
+		ResumeThread(pi.hThread);
+
 		m_hExternalProcess = pi.hProcess;
 		m_dwExternalPid = pi.dwProcessId;
 		CloseHandle(pi.hThread);
+	}
+	else
+	{
+		wchar_t logBuf[128]{};
+		swprintf_s(logBuf, L"[ExternalProcess] CreateProcess 失败, 错误码=%u", GetLastError());
+		CCommon::WriteLog(logBuf, g_data.m_log_path.c_str());
+		CloseHandle(m_hJob);
+		m_hJob = nullptr;
 	}
 }
 
@@ -73,23 +128,35 @@ void CStockFetchThread::StopExternalProcess()
 	if (m_hExternalProcess == nullptr)
 		return;
 
-	// 先尝试优雅关闭
-	HANDLE hProcess = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, m_dwExternalPid);
-	if (hProcess != nullptr)
+	// 关闭 Job Object 句柄，JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 会自动终止 Job 内所有进程
+	// 包括 PyInstaller 引导进程及其创建的 Python 子进程
+	if (m_hJob != nullptr)
 	{
-		TerminateProcess(hProcess, 0);
-		WaitForSingleObject(hProcess, 2000);
-		CloseHandle(hProcess);
+		CloseHandle(m_hJob);
+		m_hJob = nullptr;
 	}
+
+	// 等待主进程退出
+	WaitForSingleObject(m_hExternalProcess, 2000);
 	CloseHandle(m_hExternalProcess);
 	m_hExternalProcess = nullptr;
 	m_dwExternalPid = 0;
+
+	// 释放跨进程互斥体，允许后续重新启动 getPrice.exe
+	if (m_hStartMutex != nullptr)
+	{
+		CloseHandle(m_hStartMutex);
+		m_hStartMutex = nullptr;
+	}
 }
 
 void CStockFetchThread::Start()
 {
 	if (m_started.exchange(true))
+	{
+		CCommon::WriteLog(L"[FetchThread] 已启动过，跳过", g_data.m_log_path.c_str());
 		return;
+	}
 
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
 
@@ -493,19 +560,16 @@ void CStockFetchThread::RunRealtime()
 				return;
 
 			// 1. 优先尝试共享内存获取A股数据（零延迟）
-			bool tcpOk = false;
-			if (g_tdx_client.IsConnected())
+			bool tcpOk = false;			
+			try
 			{
-				try
-				{
-					tcpOk = g_data.RequestRealtimeDataByTcp();
-				}
-				catch (...)
-				{
-					tcpOk = false;
-					CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
-				}
+				tcpOk = g_data.RequestRealtimeDataByTcp();
 			}
+			catch (...)
+			{
+				tcpOk = false;
+				CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
+			}			
 
 			// 共享内存获取成功后立即刷新UI，并更新时间戳
 			// 这样下一次2秒间隔从共享内存获取时刻算起，不被HTTP阻塞
@@ -523,7 +587,7 @@ void CStockFetchThread::RunRealtime()
 				PostBackgroundTask([tcpOk]() {
 					g_data.RequestRealtimeData(tcpOk);
 					Stock::Instance().NotifyFloatingWndUpdate();
-				});
+					});
 			}
 
 			if (!tcpOk)

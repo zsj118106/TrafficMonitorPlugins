@@ -696,7 +696,7 @@ void CFloatingWnd::OnPaint()
 			// 右侧盘口（竞价模式下始终显示盘口）
 			if (!isIndexKLine)
 			{
-				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight, realtimeData, klineData, m_stock_id, m_isKLineMode, m_isMin5KLineMode, m_isMin30KLineMode);
+				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight, realtimeData, klineData, GetChartViewMode());
 			}
 		}
 		else if (!timelinePoint.empty())
@@ -1038,7 +1038,7 @@ void CFloatingWnd::OnPaint()
 			if (m_showChipPeak)
 				m_chipPeakPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight, realtimeData, chipData, timelinePoint, m_isKLineMode);
 			else
-				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight, realtimeData, klineData, m_stock_id, m_isKLineMode, m_isMin5KLineMode, m_isMin30KLineMode);
+				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight, realtimeData, klineData, GetChartViewMode());
 		}
 		else
 		{
@@ -3077,6 +3077,17 @@ void CFloatingWnd::SetTimelineModeDefaults()
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;  // 显示最新走势
 	ResetHoverState();
+}
+
+ChartViewMode CFloatingWnd::GetChartViewMode() const
+{
+	if (m_isMin30KLineMode)
+		return CHART_VIEW_MIN30_KLINE;
+	if (m_isMin5KLineMode)
+		return CHART_VIEW_MIN5_KLINE;
+	if (m_isKLineMode)
+		return CHART_VIEW_DAY_KLINE;
+	return CHART_VIEW_TIMELINE;
 }
 
 void CFloatingWnd::SetDayKLineModeDefaults()

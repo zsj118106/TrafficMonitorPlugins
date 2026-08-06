@@ -1377,16 +1377,16 @@ bool CDataManager::RequestRealtimeDataByTcp()
 		info.currentPrice = (Price)(isEtf ? item.price / 10 : item.price);
 
 		// 更新五档数据
-		info.bidLevels[0] = OrderLevel((Price)(isEtf ? item.bid1 / 10 : item.bid1), (Volume)item.bid_vol1*100);
-		info.bidLevels[1] = OrderLevel((Price)(isEtf ? item.bid2 / 10 : item.bid2), (Volume)item.bid_vol2*100);
-		info.bidLevels[2] = OrderLevel((Price)(isEtf ? item.bid3 / 10 : item.bid3), (Volume)item.bid_vol3*100);
-		info.bidLevels[3] = OrderLevel((Price)(isEtf ? item.bid4 / 10 : item.bid4), (Volume)item.bid_vol4*100);
-		info.bidLevels[4] = OrderLevel((Price)(isEtf ? item.bid5 / 10 : item.bid5), (Volume)item.bid_vol5*100);
-		info.askLevels[0] = OrderLevel((Price)(isEtf ? item.ask1 / 10 : item.ask1), (Volume)item.ask_vol1*100);
-		info.askLevels[1] = OrderLevel((Price)(isEtf ? item.ask2 / 10 : item.ask2), (Volume)item.ask_vol2*100);	
-		info.askLevels[2] = OrderLevel((Price)(isEtf ? item.ask3 / 10 : item.ask3), (Volume)item.ask_vol3*100);
-		info.askLevels[3] = OrderLevel((Price)(isEtf ? item.ask4 / 10 : item.ask4), (Volume)item.ask_vol4*100);
-		info.askLevels[4] = OrderLevel((Price)(isEtf ? item.ask5 / 10 : item.ask5), (Volume)item.ask_vol5*100);
+		info.bidLevels[0] = OrderLevel((Price)(isEtf ? item.bid1 / 10 : item.bid1), (Volume)item.bid_vol1 * 100);
+		info.bidLevels[1] = OrderLevel((Price)(isEtf ? item.bid2 / 10 : item.bid2), (Volume)item.bid_vol2 * 100);
+		info.bidLevels[2] = OrderLevel((Price)(isEtf ? item.bid3 / 10 : item.bid3), (Volume)item.bid_vol3 * 100);
+		info.bidLevels[3] = OrderLevel((Price)(isEtf ? item.bid4 / 10 : item.bid4), (Volume)item.bid_vol4 * 100);
+		info.bidLevels[4] = OrderLevel((Price)(isEtf ? item.bid5 / 10 : item.bid5), (Volume)item.bid_vol5 * 100);
+		info.askLevels[0] = OrderLevel((Price)(isEtf ? item.ask1 / 10 : item.ask1), (Volume)item.ask_vol1 * 100);
+		info.askLevels[1] = OrderLevel((Price)(isEtf ? item.ask2 / 10 : item.ask2), (Volume)item.ask_vol2 * 100);
+		info.askLevels[2] = OrderLevel((Price)(isEtf ? item.ask3 / 10 : item.ask3), (Volume)item.ask_vol3 * 100);
+		info.askLevels[3] = OrderLevel((Price)(isEtf ? item.ask4 / 10 : item.ask4), (Volume)item.ask_vol4 * 100);
+		info.askLevels[4] = OrderLevel((Price)(isEtf ? item.ask5 / 10 : item.ask5), (Volume)item.ask_vol5 * 100);
 
 		// 更新成交量/额（共享内存中vol已经是手）
 		info.volume = (Volume)item.vol * 100;       // 手→股

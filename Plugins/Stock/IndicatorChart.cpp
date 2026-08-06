@@ -61,8 +61,8 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 		memDC.FillRect(CRect(barX, barY, barX + barWidth, zeroY + (barVal >= 0 ? 0 : barHeight)), &brush);
 	}
 
-	// 绘制 DIF 线（红色）
-	CPen difPen(PS_SOLID, 1, COLOR_RED_UP);
+	// 绘制 DIF 线（蓝色）
+	CPen difPen(PS_SOLID, 1, COLOR_DARK_ORANGE);
 	memDC.SelectObject(&difPen);
 	bool difFirst = true;
 	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(macdData.size()); i++)
@@ -76,7 +76,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 		else memDC.LineTo(pointX, pointY);
 	}
 
-	// 绘制 DEA 线（蓝色）
+	// 绘制 DEA 线（暗橙色）
 	CPen deaPen(PS_SOLID, 1, COLOR_BLUE_AVG1);
 	memDC.SelectObject(&deaPen);
 	bool deaFirst = true;
@@ -465,7 +465,7 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 			}
 		}
 
-		drawLabel(_T("DIF:"), COLOR_RED_UP);
+		drawLabel(_T("DIF:"), COLOR_DARK_ORANGE);
 		drawValue(formatMACDValue(difVal), difVal);
 		drawLabel(_T("DEA:"), COLOR_BLUE_AVG1);
 		drawValue(formatMACDValue(deaVal), deaVal);
@@ -988,7 +988,10 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 
 // ========== DrawMACDChart（K线数据版本） ==========
 
-void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::KLinePoint>& klineData, const std::vector<MACDData>& macdData, int klinePeriodDays, int scrollOffset, int startIndex /* = 0 */, int visibleCount /* = -1 */)
+void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int height,
+	const std::vector<STOCK::KLinePoint>& klineData,
+	const std::vector<MACDData>& macdData, int klinePeriodDays,
+	int scrollOffset, int startIndex /* = 0 */, int visibleCount /* = -1 */)
 {
 	if (klineData.empty() || macdData.empty())
 		return;
@@ -1056,7 +1059,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 		memDC.FillRect(CRect(barX, barY, barX + barWidth, zeroY + (barVal >= 0 ? 0 : barHeight)), &brush);
 	}
 
-	CPen difPen(PS_SOLID, 1, COLOR_RED_UP);
+	CPen difPen(PS_SOLID, 1, COLOR_DARK_ORANGE);
 	memDC.SelectObject(&difPen);
 	bool difFirst = true;
 	for (int i = drawStart; i < drawEnd; i++)

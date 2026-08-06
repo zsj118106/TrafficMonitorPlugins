@@ -88,12 +88,19 @@ void STOCK::StockMarket::LoadRealtimeDataByJson(std::string json, const std::vec
 void STOCK::StockData::UpdateVolumeSample()
 {
 	if (info.innerVolume <= 0 && info.outerVolume <= 0)
+	{
+		CString log;
+		log.Format(_T("[UpdateVolumeSample] SKIP: innerOuter=0, code=%s"), info.code.c_str());
+		CCommon::WriteLog(log.GetString(), g_data.m_log_path.c_str());
 		return;
+	}
 	time_t now;
 	time(&now);
 	int tradingMinute = CDataManager::GetTradingMinute(now);
 	if (tradingMinute < 0)
+	{
 		return;
+	}
 	if (AddVolumeSample(now, info.innerVolume, info.outerVolume))
 	{
 		if (ShouldSaveSnapshot(now))
@@ -118,9 +125,9 @@ void STOCK::StockData::UpdateOrderPriceAccum()
 			return;
 		}
 
-		it->second.deltaVolume += level.volume - it->second.prevVolume;
+		it->second.deltaVolume = level.volume - it->second.prevVolume;
 		it->second.prevVolume = level.volume;
-	};
+		};
 
 	for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
 	{
@@ -182,6 +189,7 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 				stockData->UpdateVolumeSample();
 			}
 		}
+
 		if (data_arr.size() >= 39 && !data_arr[38].empty())
 		{
 			stockData->info.turnoverRate = { convert<Amount>(data_arr[38]) };
@@ -219,7 +227,6 @@ void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 				}
 			}
 		}
-
 
 		// 港股实时行情补充：当新浪API未返回港股数据时，从腾讯API数据中提取
 		// 腾讯港股数据格式：r_hk~名称~代码~现价~昨收~今开~成交量~...~涨跌额~涨跌幅~最高~最低~...~成交额~...~换手率~...~振幅

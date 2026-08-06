@@ -81,6 +81,7 @@ private:
 	void ResetHoverState();           // 重置所有悬停状态
 	void SetTimelineModeDefaults();   // 设置分时模式默认参数
 	void SetDayKLineModeDefaults();   // 设置日K模式默认参数
+	ChartViewMode GetChartViewMode() const;  // 根据3个bool获取当前视图模式
 	void SetMin5KLineModeDefaults();  // 设置5分钟K线模式默认参数
 	void SetMin30KLineModeDefaults(); // 设置30分钟K线模式默认参数
 	static void SafeSetWindowPos(CWnd& wnd, int x, int y, int cx, int cy);
