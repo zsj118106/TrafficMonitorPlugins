@@ -65,18 +65,8 @@ public:
 	void ResetText();
 	std::shared_ptr<StockData> GetStockData(const std::wstring& code);
 
-	// 判断当前是否在交易时间（A股：9:30-11:30, 13:00-15:00，非周末）
-	static bool IsMarketOpen();
-	// 判断当前是否在交易日时段（含午休，9:30-15:00，非周末）
-	static bool IsTradingDaySession();
-	// 判断当前是否在集合竞价时段（9:15-9:30，非周末）
-	static bool IsCallAuctionSession();
-
-	// 将真实时间转换为交易分钟序号（9:30=0, ..., 11:30=119, 13:00=120, ..., 14:59=239）
-	static int GetTradingMinute(time_t t);
-	static int GetTradingMinute(int hour, int minute);
-
 	// 获取最新数据
+	void RequestAllData(); // 程序初始化时获取一次全部数据
 	void RequestRealtimeData(bool onlyNonAG = false);  // onlyNonAG=true时仅获取非A股数据
 	bool RequestRealtimeDataByTcp();  // 共享内存获取A股实时行情，返回是否成功
 	void RequestTimelineData(std::wstring stock_id);

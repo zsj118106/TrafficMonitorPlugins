@@ -57,77 +57,6 @@ CDataManager& CDataManager::Instance()
 	return m_instance;
 }
 
-bool CDataManager::IsMarketOpen()
-{
-	SYSTEMTIME now;
-	GetLocalTime(&now);
-	// 周六日休市
-	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
-		return false;
-	// A股交易时间：9:30-11:30, 13:00-15:00
-	int minutes = now.wHour * 60 + now.wMinute;
-	if (minutes < 9 * 60 + 30)          // 9:30之前
-		return false;
-	if (minutes > 11 * 60 + 30 && minutes < 13 * 60)  // 11:30-13:00午休
-		return false;
-	if (minutes > 15 * 60)              // 15:00之后
-		return false;
-	return true;
-}
-
-bool CDataManager::IsTradingDaySession()
-{
-	SYSTEMTIME now;
-	GetLocalTime(&now);
-	// 周六日休市
-	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
-		return false;
-	// 交易日时段：9:30-15:00（含午休）
-	int minutes = now.wHour * 60 + now.wMinute;
-	if (minutes < 9 * 60 + 30)          // 9:30之前
-		return false;
-	if (minutes > 15 * 60)              // 15:00之后
-		return false;
-	return true;
-}
-
-bool CDataManager::IsCallAuctionSession()
-{
-	SYSTEMTIME now;
-	GetLocalTime(&now);
-	// 周六日休市
-	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
-		return false;
-	// 集合竞价时段：9:15-9:30
-	int minutes = now.wHour * 60 + now.wMinute;
-	if (minutes < 9 * 60 + 15)          // 9:15之前
-		return false;
-	if (minutes >= 9 * 60 + 30)         // 9:30及之后（竞价结束）
-		return false;
-	return true;
-}
-
-int CDataManager::GetTradingMinute(int hour, int minute)
-{
-	int totalMinutes = hour * 60 + minute;
-	if (totalMinutes < 9 * 60 + 30)
-		return -1;
-	if (totalMinutes <= 11 * 60 + 30)
-		return totalMinutes - (9 * 60 + 30);
-	if (totalMinutes < 13 * 60)
-		return -1;  // 午休期间不采样
-	if (totalMinutes <= 15 * 60)
-		return 120 + (totalMinutes - 13 * 60);
-	return -1;
-}
-
-int CDataManager::GetTradingMinute(time_t t)
-{
-	std::tm tm = {};
-	localtime_s(&tm, &t);
-	return GetTradingMinute(tm.tm_hour, tm.tm_min);
-}
-
 void CDataManager::ResetText()
 {
 	stockMarket.ClearRealtimeData();
@@ -445,7 +374,7 @@ void CDataManager::LoadTodayInnerOuterSnapshots()
 			time_t timestamp = std::get<0>(snapshots[si]);
 			STOCK::Volume innerVolume = std::get<1>(snapshots[si]);
 			STOCK::Volume outerVolume = std::get<2>(snapshots[si]);
-			int tradingMinute = GetTradingMinute(timestamp);
+			int tradingMinute = CCommon::GetTradingMinute(timestamp);
 			if (tradingMinute >= 0)
 			{
 				// 先入池当前快照
@@ -637,6 +566,28 @@ HICON CDataManager::GetIcon(UINT id)
 std::shared_ptr<StockData> CDataManager::GetStockData(const std::wstring& code)
 {
 	return stockMarket.getStock(code);
+}
+
+void CDataManager::RequestAllData()
+{
+	for (const auto& stockCode : m_setting_data.m_stock_codes)
+	{
+		if (CCommon::IsAGStockCode(stockCode))
+		{
+			//获取分时数据
+			RequestTimelineData(stockCode);
+			//获取5分钟K线数据
+			RequestMin5KLineData(stockCode, 250);
+			//获取30分钟K线数据
+			RequestMin30KLineData(stockCode, 250);
+
+			//获取基金净值
+			if (CCommon::IsFundCode(stockCode))
+			{
+				RequestFundIOPV(stockCode);
+			}
+		}
+	}
 }
 
 const STOCK::ChipDistribution* CDataManager::GetChipDistribution(const std::wstring& code)
@@ -877,7 +828,7 @@ void CDataManager::CheckAndResetAvgDiffDaily()
 	}
 
 	// 等到交易时段（获取到今日数据）才执行重置
-	if (m_avg_diff_reset_pending && IsTradingDaySession())
+	if (m_avg_diff_reset_pending && CCommon::IsMarketSession())
 	{
 		m_avg_diff_stats.clear();
 		m_avg_diff_history.clear();
@@ -1492,11 +1443,6 @@ void CDataManager::RequestFundIOPV(const std::wstring& stock_id)
 	if (CCommon::GetURL(url, stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
 	{
 		CString strData(stock_data.c_str());
-		// 调试日志：输出API返回数据前200字符
-		/*{
-			std::string logMsg = "FundIOPV OK: " + CCommon::UnicodeToStr(stock_id.c_str()) + " len=" + std::to_string(stock_data.size()) + " data=" + stock_data.substr(0, 200);
-			CCommon::WriteLog(logMsg.c_str(), g_data.m_log_path.c_str());
-		}*/
 		stockMarket.LoadFundIOPVData(stock_id, strData);
 
 		// 将当前IOPV值按分钟保存到数据库
@@ -1534,7 +1480,8 @@ void CDataManager::RequestFundIOPV(const std::wstring& stock_id)
 	}
 	else
 	{
-		CCommon::WriteLog("FundIOPV FAIL: GetURL failed", g_data.m_log_path.c_str());
+		std::string failLog = "[IOPV] FAIL: GetURL failed for " + CCommon::UnicodeToStr(stock_id.c_str()) + " url=" + CCommon::UnicodeToStr(url.c_str());
+		CCommon::WriteLog(failLog.c_str(), g_data.m_log_path.c_str());
 	}
 }
 

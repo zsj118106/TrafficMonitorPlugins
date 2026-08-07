@@ -337,7 +337,8 @@ void COrderBookPanel::DrawAskRows(CDC& memDC, const LayoutContext& lc, const STO
 		int textY = rowY + max(0, (rowH - memDC.GetTextExtent(highPart).cy) / 2);
 		memDC.SetTextColor(RGB(128, 0, 128));
 		memDC.TextOut(lc.textX, textY, highPart);
-		int lowX = lc.textX + memDC.GetTextExtent(highPart + _T("  ")).cx;
+		int lowW = memDC.GetTextExtent(lowPart).cx;
+		int lowX = lc.left + lc.panelW - lowW;
 		memDC.SetTextColor(RGB(0, 100, 0));
 		memDC.TextOut(lowX, textY, lowPart);
 

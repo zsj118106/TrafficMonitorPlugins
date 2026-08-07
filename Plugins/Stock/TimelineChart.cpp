@@ -1956,7 +1956,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			};
 		drawLabelValue(_T("现:"), ctx.realtimeData.currentPrice, COLOR_BLACK, cmpPrevClose(ctx.realtimeData.currentPrice));
 
-		if (ctx.realtimeData.IsETF() && ctx.realtimeData.iopv > 0)
+		if (ctx.realtimeData.IsETF())
 		{
 			COLORREF iopvColor = COLOR_BLACK;
 			if (ctx.realtimeData.iopv > ctx.realtimeData.currentPrice)
@@ -1964,7 +1964,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			else if (ctx.realtimeData.iopv < ctx.realtimeData.currentPrice)
 				iopvColor = COLOR_GREEN_DOWN;
 
-			CString iopvLabel = _T("IOPV:");
+			CString iopvLabel = _T("净:");
 			CString iopvVal;
 			iopvVal.Format(_T("%.4f"), ctx.realtimeData.iopv);
 			memDC.SetTextColor(COLOR_BLACK);
@@ -2032,7 +2032,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			};
 		drawLabelValue(_T("现:"), ctx.realtimeData.currentPrice, COLOR_BLACK, cmpPrevClose(ctx.realtimeData.currentPrice));
 
-		if (ctx.realtimeData.IsETF() && ctx.realtimeData.iopv > 0)
+		if (ctx.realtimeData.IsETF())
 		{
 			COLORREF iopvColor = COLOR_BLACK;
 			if (ctx.realtimeData.iopv > ctx.realtimeData.currentPrice)
@@ -2040,7 +2040,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			else if (ctx.realtimeData.iopv < ctx.realtimeData.currentPrice)
 				iopvColor = COLOR_GREEN_DOWN;
 
-			CString iopvLabel = _T("IOPV:");
+			CString iopvLabel = _T("净:");
 			CString iopvVal;
 			iopvVal.Format(_T("%.4f"), ctx.realtimeData.iopv);
 			memDC.SetTextColor(COLOR_BLACK);

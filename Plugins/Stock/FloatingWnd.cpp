@@ -1087,7 +1087,7 @@ void CFloatingWnd::OnPaint()
 				// 放在统计更新之前，确保开盘时先清零再记录今日数据
 				g_data.CheckAndResetAvgDiffDaily();
 
-				bool bTradingSession = CDataManager::IsTradingDaySession();
+				bool bTradingSession = CCommon::IsMarketSession();
 
 				if (relatedCount == 1)
 				{
@@ -1102,9 +1102,8 @@ void CFloatingWnd::OnPaint()
 						avgDiffPercent = curPct;
 						validCount = 1;
 
-						// 交易时段才更新最低/最高/实时均幅，避免非交易时间用昨日数据污染
-						if (bTradingSession)
-							g_data.SetAvgDiffStats(std::wstring(m_stock_id), lowPct, highPct, avgDiffPercent);
+						// 更新最低/最高/实时均幅（CheckAndResetAvgDiffDaily 保证开盘时清零旧数据）
+						g_data.SetAvgDiffStats(std::wstring(m_stock_id), lowPct, highPct, avgDiffPercent);
 					}
 					else
 					{
@@ -1133,9 +1132,8 @@ void CFloatingWnd::OnPaint()
 					else
 						showAvgDiff = false;
 
-					if (showAvgDiff && bTradingSession)
+					if (showAvgDiff)
 					{
-						// 交易时段才更新最低/最高均幅
 						g_data.UpdateAvgDiffStats(std::wstring(m_stock_id), avgDiffPercent);
 					}
 				}
@@ -1145,7 +1143,7 @@ void CFloatingWnd::OnPaint()
 					// 每5秒采样一次均值到历史队列（最多60个，5分钟数据）
 					static time_t lastSampleTime = 0;
 					time_t sampleNow = time(nullptr);
-					if (sampleNow - lastSampleTime >= 5 && bTradingSession)
+					if (sampleNow - lastSampleTime >= 5)
 					{
 						lastSampleTime = sampleNow;
 						g_data.PushAvgDiffHistory(std::wstring(m_stock_id), avgDiffPercent);
@@ -1154,7 +1152,7 @@ void CFloatingWnd::OnPaint()
 					// 每分钟保存最低/最高均幅到数据库（仅交易时段，避免非交易时间用昨日数据污染今日记录）
 					static time_t lastSaveTime = 0;
 					time_t now = time(nullptr);
-					if (now - lastSaveTime >= 60 && CDataManager::IsTradingDaySession())
+					if (now - lastSaveTime >= 60 && CCommon::IsMarketSession())
 					{
 						lastSaveTime = now;
 						g_data.SaveAvgDiffStatsDb(std::wstring(m_stock_id));
@@ -2536,6 +2534,15 @@ void CFloatingWnd::SetStockId(const std::wstring& stockId)
 	// 通知获取线程切换关注股票，线程自动重置计时器并立即获取新股数据
 	CStockFetchThread::Instance().SetFocusStockId(m_stock_id);
 	m_timelineScrollOffset = -1;
+	// 切换股票时重置可见点数为当前模式的默认值，避免旧值导致新股票数据显示异常
+	if (m_isKLineMode && !m_isMin5KLineMode && !m_isMin30KLineMode)
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;
+	else if (m_isMin5KLineMode)
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;
+	else if (m_isMin30KLineMode)
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_30MIN;
+	else
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
 	Invalidate();
 }
 

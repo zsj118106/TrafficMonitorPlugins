@@ -341,6 +341,8 @@ UINT CStockFetchThread::ThreadProc(LPVOID pParam)
 void CStockFetchThread::Run()
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
+	// 初始化时获取一次全量数据
+	g_data.RequestAllData();
 
 	while (true)
 	{
@@ -416,7 +418,8 @@ void CStockFetchThread::Run()
 				for (int i = 0; i < CHART_COUNT; i++)
 				{
 					// IOPV 仅对基金代码获取，且仅在交易时段获取
-					if (i == CHART_IOPV && (!CCommon::IsFundCode(stockId) || !CDataManager::IsMarketOpen()))
+					if (i == CHART_IOPV &&
+						(!CCommon::IsFundCode(stockId) || !CCommon::IsMarketSession()))
 						continue;
 
 					time_t interval = GetChartInterval(i);
@@ -426,6 +429,23 @@ void CStockFetchThread::Run()
 						chartType = i;
 						break;
 					}
+				}
+
+				// 调度诊断日志（限频10秒）
+				static time_t lastScheduleLog = 0;
+				if (now - lastScheduleLog >= 10)
+				{
+					lastScheduleLog = now;
+				}
+			}
+			else
+			{
+				// 调度诊断日志（限频10秒）
+				static time_t lastEmptyLog = 0;
+				if (now - lastEmptyLog >= 10)
+				{
+					lastEmptyLog = now;
+					CCommon::WriteLog("[ChartThread] stockId empty, skip chart tasks", g_data.m_log_path.c_str());
 				}
 			}
 		}
@@ -516,7 +536,7 @@ void CStockFetchThread::RunRealtime()
 			return;
 
 		// 检查是否需要获取实时行情
-		bool bTradingSession = CDataManager::IsTradingDaySession();
+		bool bTradingSession = CCommon::IsMarketSession();
 		bool bFullDay = g_data.m_setting_data.m_full_day == 1;
 		bool needFetch = false;
 		time_t waitSec = 1;  // 默认1秒后重新检查
@@ -544,7 +564,7 @@ void CStockFetchThread::RunRealtime()
 			}
 			else
 			{
-				time_t interval = CDataManager::IsMarketOpen()
+				time_t interval = CCommon::IsMarketSession()
 					? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
 				time_t elapsed = time(nullptr) - m_realtime_last_fetch;
 				if (elapsed >= interval)
@@ -560,7 +580,7 @@ void CStockFetchThread::RunRealtime()
 				return;
 
 			// 1. 优先尝试共享内存获取A股数据（零延迟）
-			bool tcpOk = false;			
+			bool tcpOk = false;
 			try
 			{
 				tcpOk = g_data.RequestRealtimeDataByTcp();
@@ -569,7 +589,7 @@ void CStockFetchThread::RunRealtime()
 			{
 				tcpOk = false;
 				CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
-			}			
+			}
 
 			// 共享内存获取成功后更新时间戳
 			// 这样下一次2秒间隔从共享内存获取时刻算起，不被HTTP阻塞

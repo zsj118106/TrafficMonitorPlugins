@@ -339,6 +339,11 @@ CString CCommon::FormatSignedValue(double value, const CString& format)
 	return str;
 }
 
+bool CCommon::IsAGStockCode(const std::wstring& code)
+{
+	return code.find(L"sh") == 0 || code.find(L"sz") == 0 || code.find(L"bj") == 0;
+}
+
 bool CCommon::IsFundCode(const std::wstring& code)
 {
 	std::wstring pureCode = code;
@@ -380,4 +385,59 @@ COLORREF CCommon::GetProfitLossColor(double percent)
 		return COLOR_DEEP_GREEN;
 	else
 		return COLOR_DARK_GREEN;
+}
+
+bool CCommon::IsMarketSession()
+{
+	SYSTEMTIME now;
+	GetLocalTime(&now);
+	// 周六日休市
+	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
+		return false;
+	// A股交易时间：9:30-11:30, 13:00-15:00
+	int minutes = now.wHour * 60 + now.wMinute;
+	if (minutes < 9 * 60 + 30)          // 9:30之前
+		return false;
+	if (minutes > 11 * 60 + 30 && minutes < 13 * 60)  // 11:30-13:00午休
+		return false;
+	if (minutes > 15 * 60)              // 15:00之后
+		return false;
+	return true;
+}
+
+bool CCommon::IsCallAuctionSession()
+{
+	SYSTEMTIME now;
+	GetLocalTime(&now);
+	// 周六日休市
+	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
+		return false;
+	// 集合竞价时段：9:15-9:30
+	int minutes = now.wHour * 60 + now.wMinute;
+	if (minutes < 9 * 60 + 15)          // 9:15之前
+		return false;
+	if (minutes >= 9 * 60 + 30)         // 9:30及之后（竞价结束）
+		return false;
+	return true;
+}
+
+int CCommon::GetTradingMinute(int hour, int minute)
+{
+	int totalMinutes = hour * 60 + minute;
+	if (totalMinutes < 9 * 60 + 30)
+		return -1;
+	if (totalMinutes <= 11 * 60 + 30)
+		return totalMinutes - (9 * 60 + 30);
+	if (totalMinutes < 13 * 60)
+		return -1;  // 午休期间不采样
+	if (totalMinutes <= 15 * 60)
+		return 120 + (totalMinutes - 13 * 60);
+	return -1;
+}
+
+int CCommon::GetTradingMinute(time_t t)
+{
+	std::tm tm = {};
+	localtime_s(&tm, &t);
+	return GetTradingMinute(tm.tm_hour, tm.tm_min);
 }

@@ -89,14 +89,11 @@ void STOCK::StockData::UpdateVolumeSample()
 {
 	if (info.innerVolume <= 0 && info.outerVolume <= 0)
 	{
-		CString log;
-		log.Format(_T("[UpdateVolumeSample] SKIP: innerOuter=0, code=%s"), info.code.c_str());
-		CCommon::WriteLog(log.GetString(), g_data.m_log_path.c_str());
 		return;
 	}
 	time_t now;
 	time(&now);
-	int tradingMinute = CDataManager::GetTradingMinute(now);
+	int tradingMinute = CCommon::GetTradingMinute(now);
 	if (tradingMinute < 0)
 	{
 		return;
@@ -1075,14 +1072,49 @@ void STOCK::StockData::addKLineData(const CString& json_data)
 void STOCK::StockMarket::LoadKLineDataByJson(std::wstring stock_id, CString* pData)
 {
 	auto data = g_data.GetStockData(stock_id);
+	if (pData)
 	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		data->clearKLineData();
-		if (pData)
+		// 先将新数据解析到临时向量，避免空响应覆盖已有缓存数据
+		std::vector<KLinePoint> newPoints;
 		{
-			data->addKLineData(*pData);
+			std::string _json_data = CCommon::UnicodeToStr(*pData);
+			yyjson_doc* doc = yyjson_read(_json_data.c_str(), _json_data.size(), 0);
+			if (doc != nullptr)
+			{
+				yyjson_val* root = yyjson_doc_get_root(doc);
+				if (root != nullptr && yyjson_is_arr(root))
+				{
+					yyjson_val* item;
+					yyjson_arr_iter iter;
+					yyjson_arr_iter_init(root, &iter);
+					while ((item = yyjson_arr_iter_next(&iter)))
+					{
+						if (item != nullptr && yyjson_is_obj(item))
+						{
+							KLinePoint point;
+							point.day = utilities::JsonHelper::GetJsonString(item, "day");
+							point.open = GetJsonPrice(item, "open");
+							point.high = GetJsonPrice(item, "high");
+							point.low = GetJsonPrice(item, "low");
+							point.close = GetJsonPrice(item, "close");
+							point.volume = GetJsonVolume(item, "volume");
+							newPoints.push_back(point);
+						}
+					}
+				}
+				yyjson_doc_free(doc);
+			}
+		}
+		// 仅当新数据非空时才替换旧数据
+		if (!newPoints.empty())
+		{
+			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+			data->clearKLineData();
+			for (const auto& pt : newPoints)
+				data->addKLinePoint(pt);
 		}
 	}
+	// 网络异常时不清空已有数据
 	Stock::Instance().UpdateKLine();
 }
 
@@ -1159,28 +1191,98 @@ void STOCK::StockData::addMin30KLineData(const CString& json_data)
 void STOCK::StockMarket::LoadMin5KLineDataByJson(std::wstring stock_id, CString* pData)
 {
 	auto data = g_data.GetStockData(stock_id);
+	if (pData)
 	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		data->clearMin5KLineData();
-		if (pData)
+		// 先将新数据解析到临时向量，避免空响应覆盖已有缓存数据
+		std::vector<KLinePoint> newPoints;
 		{
-			data->addMin5KLineData(*pData);
+			std::string _json_data = CCommon::UnicodeToStr(*pData);
+			yyjson_doc* doc = yyjson_read(_json_data.c_str(), _json_data.size(), 0);
+			if (doc != nullptr)
+			{
+				yyjson_val* root = yyjson_doc_get_root(doc);
+				if (root != nullptr && yyjson_is_arr(root))
+				{
+					yyjson_val* item;
+					yyjson_arr_iter iter;
+					yyjson_arr_iter_init(root, &iter);
+					while ((item = yyjson_arr_iter_next(&iter)))
+					{
+						if (item != nullptr && yyjson_is_obj(item))
+						{
+							KLinePoint point;
+							point.day = utilities::JsonHelper::GetJsonString(item, "day");
+							point.open = GetJsonPrice(item, "open");
+							point.high = GetJsonPrice(item, "high");
+							point.low = GetJsonPrice(item, "low");
+							point.close = GetJsonPrice(item, "close");
+							point.volume = GetJsonVolume(item, "volume");
+							newPoints.push_back(point);
+						}
+					}
+				}
+				yyjson_doc_free(doc);
+			}
+		}
+		// 仅当新数据非空时才替换旧数据
+		if (!newPoints.empty())
+		{
+			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+			data->clearMin5KLineData();
+			for (const auto& pt : newPoints)
+				data->addMin5KLinePoint(pt);
 		}
 	}
+	// 网络异常时不清空已有数据
 	Stock::Instance().UpdateKLine();
 }
 
 void STOCK::StockMarket::LoadMin30KLineDataByJson(std::wstring stock_id, CString* pData)
 {
 	auto data = g_data.GetStockData(stock_id);
+	if (pData)
 	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		data->clearMin30KLineData();
-		if (pData)
+		// 先将新数据解析到临时向量，避免空响应覆盖已有缓存数据
+		std::vector<KLinePoint> newPoints;
 		{
-			data->addMin30KLineData(*pData);
+			std::string _json_data = CCommon::UnicodeToStr(*pData);
+			yyjson_doc* doc = yyjson_read(_json_data.c_str(), _json_data.size(), 0);
+			if (doc != nullptr)
+			{
+				yyjson_val* root = yyjson_doc_get_root(doc);
+				if (root != nullptr && yyjson_is_arr(root))
+				{
+					yyjson_val* item;
+					yyjson_arr_iter iter;
+					yyjson_arr_iter_init(root, &iter);
+					while ((item = yyjson_arr_iter_next(&iter)))
+					{
+						if (item != nullptr && yyjson_is_obj(item))
+						{
+							KLinePoint point;
+							point.day = utilities::JsonHelper::GetJsonString(item, "day");
+							point.open = GetJsonPrice(item, "open");
+							point.high = GetJsonPrice(item, "high");
+							point.low = GetJsonPrice(item, "low");
+							point.close = GetJsonPrice(item, "close");
+							point.volume = GetJsonVolume(item, "volume");
+							newPoints.push_back(point);
+						}
+					}
+				}
+				yyjson_doc_free(doc);
+			}
+		}
+		// 仅当新数据非空时才替换旧数据
+		if (!newPoints.empty())
+		{
+			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+			data->clearMin30KLineData();
+			for (const auto& pt : newPoints)
+				data->addMin30KLinePoint(pt);
 		}
 	}
+	// 网络异常时不清空已有数据
 	Stock::Instance().UpdateKLine();
 }
 

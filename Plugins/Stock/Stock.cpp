@@ -125,8 +125,8 @@ const wchar_t* Stock::GetTooltipInfo()
 void Stock::DataRequired()
 {
 	time_t cur_time = time(nullptr);
-	bool bTradingSession = CDataManager::IsTradingDaySession();
-	bool bCallAuction = CDataManager::IsCallAuctionSession();
+	bool bTradingSession = CCommon::IsMarketSession();
+	bool bCallAuction = CCommon::IsCallAuctionSession();
 	// 实时行情数据由 StockFetchThread 工作线程自主定时获取（盘中2秒，午休60秒），无需外部驱动
 	// 集合竞价时段（9:15-9:30）：每3秒获取一次竞价数据
 	if (bCallAuction)
@@ -298,7 +298,7 @@ void Stock::SendStockInfoRequest()
 		Stock::Instance().m_last_request_time = cur_time;
 
 		// 休市检测：非全天更新模式且不在交易日时段（收盘后/盘前/周末），则不再请求
-		if (g_data.m_setting_data.m_full_day != 1 && !CDataManager::IsTradingDaySession())
+		if (g_data.m_setting_data.m_full_day != 1 && !CCommon::IsMarketSession())
 		{
 			CCommon::WriteLog(L"Not currently in trading time!", g_data.m_log_path.c_str());
 			g_data.ResetText();
@@ -391,7 +391,7 @@ void Stock::PreloadAllKLineData()
 			if (!g_data.HasKLineCache(code, STOCK::Period::MIN30))
 				g_data.RequestMin30KLineData(code, 250);
 		}
-	});
+		});
 }
 
 void Stock::PreloadAllChipDistributionData()
@@ -405,7 +405,7 @@ void Stock::PreloadAllChipDistributionData()
 		{
 			g_data.RequestChipDistributionData(code);
 		}
-	});
+		});
 }
 
 void Stock::PreloadAllStockBasicData()
@@ -419,7 +419,7 @@ void Stock::PreloadAllStockBasicData()
 		{
 			g_data.RequestStockBasicData(code);
 		}
-	});
+		});
 }
 
 void Stock::UpdateKLine()
@@ -1824,31 +1824,31 @@ void Stock::UpdateMacdCalcForStock(const std::wstring& code)
 	// 辅助lambda：计算单周期MACD并缓存，数据不足时不更新calcTime以便下次重试
 	auto calcPeriodMacd = [&](STOCK::StockData::PeriodMacdCache& cache, int interval,
 		std::function<bool(std::vector<STOCK::Bar>&)> getBars) {
-		if (now - cache.calcTime < interval)
-			return;
+			if (now - cache.calcTime < interval)
+				return;
 
-		std::vector<STOCK::Bar> bars;
-		if (getBars(bars) && bars.size() >= 26)
-		{
-			std::vector<double> dif, dea, barSeq;
-			CSignalAnalyzer::CalcMACDSeries(bars, dif, dea, barSeq);
-
-			cache.macdData.resize(dif.size());
-			cache.priceSeq.resize(bars.size());
-			for (size_t i = 0; i < dif.size(); i++)
+			std::vector<STOCK::Bar> bars;
+			if (getBars(bars) && bars.size() >= 26)
 			{
-				cache.macdData[i].dif = dif[i];
-				cache.macdData[i].dea = dea[i];
-				cache.macdData[i].bar = barSeq[i];
-				cache.macdData[i].isAboveZero = (dif[i] > 0);
+				std::vector<double> dif, dea, barSeq;
+				CSignalAnalyzer::CalcMACDSeries(bars, dif, dea, barSeq);
+
+				cache.macdData.resize(dif.size());
+				cache.priceSeq.resize(bars.size());
+				for (size_t i = 0; i < dif.size(); i++)
+				{
+					cache.macdData[i].dif = dif[i];
+					cache.macdData[i].dea = dea[i];
+					cache.macdData[i].bar = barSeq[i];
+					cache.macdData[i].isAboveZero = (dif[i] > 0);
+				}
+				for (size_t i = 0; i < bars.size(); i++)
+					cache.priceSeq[i] = bars[i].close;
+				cache.dataReady = true;
+				cache.calcTime = now;
 			}
-			for (size_t i = 0; i < bars.size(); i++)
-				cache.priceSeq[i] = bars[i].close;
-			cache.dataReady = true;
-			cache.calcTime = now;
-		}
-		// 数据不足时不更新calcTime，下次继续重试
-	};
+			// 数据不足时不更新calcTime，下次继续重试
+		};
 
 	// 日K MACD：每天计算1次
 	calcPeriodMacd(stock_data->dayMacdCache, STOCK::StockData::DAY_MACD_INTERVAL,
@@ -1942,7 +1942,7 @@ void Stock::JudgeMacdTrendForStock(const std::wstring& code)
 			seq.data[i].isAboveZero = cache.macdData[i].isAboveZero;
 		}
 		return seq;
-	};
+		};
 
 	CSignalAnalyzer::PeriodMacdSeq daySeq = buildSeq(stock_data->dayMacdCache, CSignalAnalyzer::PeriodType::DAY);
 	CSignalAnalyzer::PeriodMacdSeq m30Seq = buildSeq(stock_data->m30MacdCache, CSignalAnalyzer::PeriodType::M30);

@@ -111,12 +111,24 @@ public:
 	// 带正负号的数值格式化：正数带"+"前缀，负数不带额外符号
 	static CString FormatSignedValue(double value, const CString& format = _T("%.2f"));
 
+	// 判断股票代码是否为A股代码
+	static bool IsAGStockCode(const std::wstring& code);
 	// 判断股票代码是否为基金/ETF类标的
 	static bool IsFundCode(const std::wstring& code);
 
 	// 根据涨跌幅百分比获取颜色
 	// >= 5%: 紫色, 0%~5%: 红色, -5%~0%: 绿色, <= -5%: 墨绿色
 	static COLORREF GetProfitLossColor(double percent);
+
+	// 判断当前是否在交易时间（A股：9:30-11:30, 13:00-15:00，非周末）
+	static bool IsMarketSession();
+
+	// 判断当前是否在集合竞价时段（9:15-9:30，非周末）
+	static bool IsCallAuctionSession();
+
+	// 将真实时间转换为交易分钟序号（9:30=0, ..., 11:30=119, 13:00=120, ..., 14:59=239）
+	static int GetTradingMinute(time_t t);
+	static int GetTradingMinute(int hour, int minute);
 };
 
 //通过构造函数传递一个bool变量的引用，在构造时将其置为true，析构时置为false
