@@ -97,6 +97,7 @@ private:
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	void UpdateModeButtons();
 	void UpdatePeriodComboVisibility();
 
@@ -200,6 +201,7 @@ private:
 	bool m_showMA{ false };
 	bool m_showBollBands{ true };
 	bool m_showAmplitudeBands{ false };  // 振幅上下线（与布林带互斥）
+	volatile bool m_chartDirty{ false };  // 图表数据更新标识，由PostMessage设置，定时器检查
 	int m_klineHoveredBarIndex{ -1 };
 	CString m_klineHoverTip;
 	CString m_klineVolumeHoverTip;

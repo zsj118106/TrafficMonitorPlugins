@@ -106,7 +106,7 @@ private:
 	void DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, int x, int y, int rowWidth, bool blinkOff = false);
 
 	// 辅助：绘制净比条形图
-	void DrawRatioBar(CDC& memDC, int x, int y, int w, int h, double ratio, STOCK::Volume diff);
+	void DrawRatioBar(CDC& memDC, int x, int y, int w, int h, double ratio);
 
 	// 辅助：在净比条形图上绘制文本
 	void DrawNetRatioBarText(CDC& memDC, int x, int y, int w, int h, const CString& ratioText, const CString& diffText);

@@ -140,7 +140,7 @@ void Stock::DataRequired()
 		}
 	}
 	// 图表数据由 StockFetchThread 工作线程自主定时获取，无需外部驱动
-	// UI 刷新也由工作线程获取完数据后主动通知（NotifyFloatingWndUpdate），无需此处重复刷新
+	// UI 刷新由浮动窗口2秒定时器统一驱动，无需此处重复刷新
 
 	// 多周期MACD分层计算（各周期按独立间隔计算MACD并缓存）
 	UpdateMacdCalcForAllStocks();
@@ -435,7 +435,7 @@ void Stock::UpdateKLine()
 	std::lock_guard<std::mutex> lock(m_wndMutex);
 	if (m_pFloatingWnd != NULL && ::IsWindow(m_pFloatingWnd->GetSafeHwnd()))
 	{
-		m_pFloatingWnd->SendMessage((WM_USER + 100), FALSE, 0);
+		m_pFloatingWnd->PostMessage(FWND_MSG_UPDATE_STATUS, 0, 0);
 		// DWORD_PTR dwResult = 0;
 		// LRESULT lr = ::SendMessageTimeout(
 		//     m_pFloatingWnd->GetSafeHwnd(),  // 目标窗口句柄

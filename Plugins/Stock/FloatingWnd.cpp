@@ -103,7 +103,8 @@ enum {
 	IDC_ORDER_BOOK_BTN = 1019,
 	IDC_EXPAND_BTN = 1020,
 	IDC_TOGGLE_STOCK_LIST_BTN = 1021,
-	IDC_CALL_AUCTION_BTN = 1022
+	IDC_CALL_AUCTION_BTN = 1022,
+	IDC_REFRESH_TIMER = 1023
 };
 
 BEGIN_MESSAGE_MAP(CFloatingWnd, CWnd)
@@ -117,6 +118,7 @@ BEGIN_MESSAGE_MAP(CFloatingWnd, CWnd)
 	ON_WM_MOUSEWHEEL()
 	ON_WM_HSCROLL()
 	ON_WM_DESTROY()
+	ON_WM_TIMER()
 	ON_MESSAGE((WM_USER + 100), OnUpdateStatus)
 	ON_MESSAGE((WM_USER + 102), OnShowEditDialog)
 	ON_MESSAGE((WM_USER + 103), OnShowAddDialog)
@@ -233,6 +235,9 @@ int CFloatingWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	UpdateModeButtons();
 	UpdatePeriodComboVisibility();
 
+	// 固定2秒定时刷新UI，不再依赖工作线程的消息通知
+	SetTimer(IDC_REFRESH_TIMER, 2000, NULL);
+
 	Invalidate();
 	return 0;
 }
@@ -240,7 +245,8 @@ int CFloatingWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 // 处理消息
 LRESULT CFloatingWnd::OnUpdateStatus(WPARAM wParam, LPARAM lParam)
 {
-	Invalidate();
+	// 仅设置图表数据更新标识，由2秒定时器统一触发重绘
+	m_chartDirty = true;
 	return 0;
 }
 
@@ -1077,6 +1083,12 @@ void CFloatingWnd::OnPaint()
 			{
 				std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
 
+				// 跨天时标记待重置，等交易时段获取到今日数据后才清零均幅记录
+				// 放在统计更新之前，确保开盘时先清零再记录今日数据
+				g_data.CheckAndResetAvgDiffDaily();
+
+				bool bTradingSession = CDataManager::IsTradingDaySession();
+
 				if (relatedCount == 1)
 				{
 					// 只有关联1只股票时，直接用该股票的最低价/最高价/实时价计算涨跌幅
@@ -1090,8 +1102,9 @@ void CFloatingWnd::OnPaint()
 						avgDiffPercent = curPct;
 						validCount = 1;
 
-						// 更新最低/最高/实时均幅
-						g_data.SetAvgDiffStats(std::wstring(m_stock_id), lowPct, highPct, avgDiffPercent);
+						// 交易时段才更新最低/最高/实时均幅，避免非交易时间用昨日数据污染
+						if (bTradingSession)
+							g_data.SetAvgDiffStats(std::wstring(m_stock_id), lowPct, highPct, avgDiffPercent);
 					}
 					else
 					{
@@ -1120,31 +1133,28 @@ void CFloatingWnd::OnPaint()
 					else
 						showAvgDiff = false;
 
-					if (showAvgDiff)
+					if (showAvgDiff && bTradingSession)
 					{
-						// 更新最低/最高均幅
+						// 交易时段才更新最低/最高均幅
 						g_data.UpdateAvgDiffStats(std::wstring(m_stock_id), avgDiffPercent);
 					}
 				}
 
 				if (showAvgDiff)
 				{
-					// 每日开盘重置均幅记录
-					g_data.CheckAndResetAvgDiffDaily();
-
 					// 每5秒采样一次均值到历史队列（最多60个，5分钟数据）
 					static time_t lastSampleTime = 0;
 					time_t sampleNow = time(nullptr);
-					if (sampleNow - lastSampleTime >= 5)
+					if (sampleNow - lastSampleTime >= 5 && bTradingSession)
 					{
 						lastSampleTime = sampleNow;
 						g_data.PushAvgDiffHistory(std::wstring(m_stock_id), avgDiffPercent);
 					}
 
-					// 每分钟保存最低/最高均幅到数据库
+					// 每分钟保存最低/最高均幅到数据库（仅交易时段，避免非交易时间用昨日数据污染今日记录）
 					static time_t lastSaveTime = 0;
 					time_t now = time(nullptr);
-					if (now - lastSaveTime >= 60)
+					if (now - lastSaveTime >= 60 && CDataManager::IsTradingDaySession())
 					{
 						lastSaveTime = now;
 						g_data.SaveAvgDiffStatsDb(std::wstring(m_stock_id));
@@ -1389,7 +1399,7 @@ void CFloatingWnd::OnPaint()
 					COLORREF redColor = AVG_RED_COLORS[redIdx];
 					COLORREF greenColor = AVG_GREEN_COLORS[greenIdx];
 
-					// 绘制红绿背景：均值在最低值和最高值之间的位置决定红绿比例
+					// 绘制红绿背景：宽度大的颜色在左，宽度小的在右
 					if (range == 0 || avgDiffPercent <= minAvgDiff)
 					{
 						// 均值等于最低值，全绿
@@ -1402,12 +1412,23 @@ void CFloatingWnd::OnPaint()
 					}
 					else
 					{
-						// 均值在中间：左侧红色，右侧绿色，比例由均值位置决定
+						// 均值在中间：比例由均值位置决定
 						double ratio = (avgDiffPercent - minAvgDiff) / range;
 						int redWidth = static_cast<int>(ratio * avgAreaWidth);
 						redWidth = max(0, min(redWidth, avgAreaWidth));
-						memDC.FillSolidRect(avgAreaX, avgAreaY, redWidth, avgAreaH, redColor);
-						memDC.FillSolidRect(avgAreaX + redWidth, avgAreaY, avgAreaWidth - redWidth, avgAreaH, greenColor);
+						int greenWidth = avgAreaWidth - redWidth;
+						if (redWidth >= greenWidth)
+						{
+							// 红色宽度大，红色在左
+							memDC.FillSolidRect(avgAreaX, avgAreaY, redWidth, avgAreaH, redColor);
+							memDC.FillSolidRect(avgAreaX + redWidth, avgAreaY, greenWidth, avgAreaH, greenColor);
+						}
+						else
+						{
+							// 绿色宽度大，绿色在左
+							memDC.FillSolidRect(avgAreaX, avgAreaY, greenWidth, avgAreaH, greenColor);
+							memDC.FillSolidRect(avgAreaX + greenWidth, avgAreaY, redWidth, avgAreaH, redColor);
+						}
 					}
 
 					// 切换到固定字体绘制均幅区域
@@ -3041,7 +3062,7 @@ void CFloatingWnd::EnsureChipPeakData()
 			CStockFetchThread::Instance().PostBackgroundTask([stockId]() {
 				g_data.RequestStockBasicData(stockId);
 				g_data.RequestChipDistributionData(stockId);
-				// UI刷新由实时行情线程统一驱动，此处仅更新数据
+				// UI刷新由2秒定时器统一驱动，此处仅更新数据
 				});
 		}
 	}
@@ -3360,10 +3381,25 @@ LRESULT CFloatingWnd::OnShowTradeDialog(WPARAM wParam, LPARAM lParam)
 
 void CFloatingWnd::OnDestroy()
 {
+	KillTimer(IDC_REFRESH_TIMER);
+
 	CWnd::OnDestroy();
 
 	if (m_CTransparentWnd.GetSafeHwnd())
 	{
 		m_CTransparentWnd.DestroyWindow();
 	}
+}
+
+void CFloatingWnd::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == IDC_REFRESH_TIMER)
+	{
+		// 固定2秒定时刷新：实时行情数据由工作线程持续更新到共享数据结构
+		// 图表数据（K线/分时等）通过PostMessage设置m_chartDirty标识
+		// 此处统一触发重绘，读取最新数据
+		m_chartDirty = false;
+		Invalidate();
+	}
+	CWnd::OnTimer(nIDEvent);
 }

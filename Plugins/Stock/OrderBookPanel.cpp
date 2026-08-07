@@ -29,7 +29,8 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 	ChartViewMode viewMode)
 {
 	const int MAX_LEVEL = STOCK::StockInfo::MAX_LEVEL;
-	// 布局：0=委比, 1=趋势, 2=最高, 3=卖三, 4=卖二, 5=卖一, 6=净比00, 7=买一, 8=买二, 9=买三, 10=最低, 11-14=净比01/05/10/20, 15=净比99, 16=振幅, 17=换手率
+	// 布局：0=委比, 1=趋势, 2=最高/最低, 3-7=卖五~卖一, 8-12=买一~买五, 13-14=净比05/30, 15=净比99, 16=振幅, 17=换手率
+	// 净比00画在卖一(行7)和买一(行8)之间的间隙，不占独立行
 	const int totalRows = 18;
 	const int headerHeight = g_data.RDPI(26);  // 主标题栏高度
 	const int obTitleH = g_data.RDPI(16);       // 盘口标题栏高度，与走势图标题栏一致
@@ -106,7 +107,7 @@ void COrderBookPanel::DrawWeiBi(CDC& memDC, const LayoutContext& lc, const STOCK
 	memDC.TextOut(lc.textX, wbBarY + max(0, (wbBarH - memDC.GetTextExtent(wbLabel).cy) / 2), wbLabel);
 	int wbBarX = lc.textX + memDC.GetTextExtent(wbLabel).cx + g_data.RDPI(4);
 	int wbBarW = lc.right - wbBarX - g_data.RDPI(4);
-	DrawRatioBar(memDC, wbBarX, wbBarY, wbBarW, wbBarH, wbRatio, bidTotal - askTotal);
+	DrawRatioBar(memDC, wbBarX, wbBarY, wbBarW, wbBarH, wbRatio);
 	CString wbTxt;
 	wbTxt.Format(_T("%.2f"), std::abs(wbRatio));
 	DrawNetRatioBarText(memDC, wbBarX, wbBarY, wbBarW, wbBarH, wbTxt, _T(""));
@@ -306,137 +307,137 @@ void COrderBookPanel::DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK
 }
 
 // ============================================================================
-// 绘制卖盘行（最高+卖三~卖一，行2-5）
+// 绘制最高/最低合并行（行2）+ 卖盘行（卖五~卖一，行3-7）
 // ============================================================================
 void COrderBookPanel::DrawAskRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, bool blinkOn)
 {
-	std::vector<OrderBookRow> priceRows;
-	priceRows.reserve(4);  // 最高+卖三~卖一
-
-	// 最高价（固定在卖三上面）
+	// 行2：最高/最低合并行
 	{
-		CString highTxt;
-		double highDiff = stockInfo.highPrice - stockInfo.currentPrice;
-		if (highDiff >= 0)
-			highTxt.Format(_T("最高: %s +%s"), CCommon::FormatFloat(stockInfo.highPrice), CCommon::FormatFloat(highDiff));
-		else
-			highTxt.Format(_T("最高: %s %s"), CCommon::FormatFloat(stockInfo.highPrice), CCommon::FormatFloat(highDiff));
+		int rowY = lc.RowY(2);
+		int rowH = lc.RowH(2);
 
-		OrderBookRow row;
-		row.price = stockInfo.highPrice;
-		row.text = highTxt;
-		row.textColor = RGB(128, 0, 128);
-		row.fillBackground = true;
-		row.backgroundColor = RGB(220, 235, 250);
-		priceRows.push_back(row);
+		// 使用小字体
+		CFont* oldFont = memDC.GetCurrentFont();
+		LOGFONT lf;
+		oldFont->GetLogFont(&lf);
+		lf.lfHeight = lf.lfHeight * 7 / 8;
+		CFont smallFont;
+		smallFont.CreateFontIndirect(&lf);
+		memDC.SelectObject(&smallFont);
+
+		CString highPart, lowPart;
+		double highDiff = stockInfo.highPrice - stockInfo.currentPrice;
+		double lowDiff = stockInfo.lowPrice - stockInfo.currentPrice;
+		CString highSign = highDiff >= 0 ? _T("+") : _T("");
+		CString lowSign = lowDiff >= 0 ? _T("+") : _T("");
+		highPart.Format(_T("H:%s %s%s"), CCommon::FormatFloat(stockInfo.highPrice), highSign.GetString(), CCommon::FormatFloat(highDiff));
+		lowPart.Format(_T("L:%s %s%s"), CCommon::FormatFloat(stockInfo.lowPrice), lowSign.GetString(), CCommon::FormatFloat(lowDiff));
+
+		memDC.FillSolidRect(lc.left, rowY, lc.panelW, rowH, RGB(220, 235, 250));
+		int textY = rowY + max(0, (rowH - memDC.GetTextExtent(highPart).cy) / 2);
+		memDC.SetTextColor(RGB(128, 0, 128));
+		memDC.TextOut(lc.textX, textY, highPart);
+		int lowX = lc.textX + memDC.GetTextExtent(highPart + _T("  ")).cx;
+		memDC.SetTextColor(RGB(0, 100, 0));
+		memDC.TextOut(lowX, textY, lowPart);
+
+		memDC.SelectObject(oldFont);
 	}
 
-	// 卖三~卖一
-	for (int idx = 2; idx >= 0; --idx)
+	// 行3-7：卖五~卖一
+	std::vector<OrderBookRow> priceRows;
+	priceRows.reserve(5);
+
+	for (int idx = 4; idx >= 0; --idx)
 	{
 		STOCK::Price price = stockInfo.askLevels[idx].price;
 		STOCK::Volume delta = GetOrderDeltaLots(price);
 		priceRows.push_back(BuildAskRow(stockInfo, idx, delta));
 	}
 
-	DrawPriceRows(memDC, lc, priceRows, 2, blinkOn);
+	DrawPriceRows(memDC, lc, priceRows, 3, blinkOn);
 }
 
 // ============================================================================
-// 绘制净比00柱状图（行6）
+// 绘制净比00 - 卖一与买一之间的分隔线（1分钟加权平均净比）
 // ============================================================================
 void COrderBookPanel::DrawNetRatio00(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo)
 {
 	auto stockDataPtr00 = g_data.GetStockData(stockInfo.code);
-	int row6H = lc.RowH(6);
+	if (!stockDataPtr00)
+		return;
 
-	int periodBarX = lc.textX;
-	int periodBarW = lc.right - periodBarX - g_data.RDPI(4);
+	// 从secVolumePool取1分钟加权平均净比
+	STOCK::Volume diff = 0;
+	double ratio = 0;
+	if (!stockDataPtr00->GetSecNetDiff(1, diff, ratio))
+		return;
 
-	if (periodBarW > 0 && stockDataPtr00)
+	int barX = lc.textX;
+	int barW = lc.right - barX - g_data.RDPI(4);
+	if (barW <= 0)
+		return;
+
+	// 画在卖一(行7)和买一(行8)之间的间隙
+	int barY = lc.RowY(8) - 2;
+	int midX = barX + barW / 2;
+	int halfW = barW / 2;
+	int fillW = static_cast<int>(std::sqrt(std::abs(ratio) / 100.0) * halfW);
+	fillW = min(fillW, halfW);
+	int dominantW = min(barW, halfW + fillW);
+
+	COLORREF redColor = NET_RATIO_RED_COLORS[GetNetRatioColorIndex(ratio)];
+	COLORREF greenColor = NET_RATIO_GREEN_COLORS[GetNetRatioColorIndex(ratio)];
+
+	if (ratio > 0)
 	{
-		std::vector<double> recentRatios;
-		const int barCount = 12;
-		if (stockDataPtr00->GetRecentNetRatios(barCount, recentRatios))
-		{
-			int baseSlotW = periodBarW / barCount;
-			int remSlotW = periodBarW % barCount;
-			int barPad = max(1, baseSlotW / 8);
-			int slotX = periodBarX;
-			for (int i = 0; i < barCount; i++)
-			{
-				int curSlotW = baseSlotW + (i < remSlotW ? 1 : 0);
-				int curBarX = slotX + barPad;
-				int curBarW = curSlotW - barPad * 2;
-				if (curBarW < 1) curBarW = 1;
-
-				double r = recentRatios[i];
-				COLORREF barColor;
-				if (r > 0) barColor = COLOR_RED_UP;
-				else if (r < 0) barColor = COLOR_GREEN_DOWN;
-				else barColor = COLOR_BLACK;
-
-				int maxBarH = row6H - g_data.RDPI(4);
-				int barH = static_cast<int>((std::min)(std::sqrt(std::abs(r) / 100.0), 1.0) * maxBarH);
-				if (barH < 2) barH = 2;
-
-				int barY = lc.RowY(6) + (row6H - barH) / 2;
-				memDC.FillSolidRect(curBarX, barY, curBarW, barH, barColor);
-				slotX += curSlotW;
-			}
-		}
+		memDC.FillSolidRect(barX, barY, dominantW, 2, redColor);
+		memDC.FillSolidRect(barX + dominantW, barY, barW - dominantW, 2, greenColor);
 	}
+	else if (ratio < 0)
+	{
+		memDC.FillSolidRect(barX, barY, dominantW, 2, greenColor);
+		memDC.FillSolidRect(barX + dominantW, barY, barW - dominantW, 2, redColor);
+	}
+	else
+	{
+		memDC.FillSolidRect(barX, barY, barW, 2, RGB(230, 230, 230));
+	}
+	// 中间白色竖线
+	memDC.FillSolidRect(midX - 1, barY, 2, 2, RGB(255, 255, 255));
 }
 
 // ============================================================================
-// 绘制买盘行（买一~买三+最低（行7-10）
+// 绘制买盘行（买一~买五，行8-12）
 // ============================================================================
 void COrderBookPanel::DrawBidRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, bool blinkOn)
 {
 	std::vector<OrderBookRow> bottomRows;
-	bottomRows.reserve(4);  // 买一~买三+最低
+	bottomRows.reserve(5);  // 买一~买五
 
-	// 买一~买三
-	for (int i = 0; i < 3; i++)
+	// 买一~买五
+	for (int i = 0; i < 5; i++)
 	{
 		STOCK::Price price = stockInfo.bidLevels[i].price;
 		STOCK::Volume delta = GetOrderDeltaLots(price);
 		bottomRows.push_back(BuildBidRow(stockInfo, i, delta));
 	}
 
-	// 最低价（固定在买三下面）
-	{
-		CString lowTxt;
-		double lowDiff = stockInfo.lowPrice - stockInfo.currentPrice;
-		if (lowDiff >= 0)
-			lowTxt.Format(_T("最低: %s +%s"), CCommon::FormatFloat(stockInfo.lowPrice), CCommon::FormatFloat(lowDiff));
-		else
-			lowTxt.Format(_T("最低: %s %s"), CCommon::FormatFloat(stockInfo.lowPrice), CCommon::FormatFloat(lowDiff));
-
-		OrderBookRow row;
-		row.price = stockInfo.lowPrice;
-		row.text = lowTxt;
-		row.textColor = RGB(0, 100, 0);
-		row.fillBackground = true;
-		row.backgroundColor = RGB(220, 235, 250);
-		bottomRows.push_back(row);
-	}
-
-	DrawPriceRows(memDC, lc, bottomRows, 7, blinkOn);
+	DrawPriceRows(memDC, lc, bottomRows, 8, blinkOn);
 }
 
 // ============================================================================
-// 绘制净比01/05/10/20（行11-14）
+// 绘制净比05/30（行13-14）
 // ============================================================================
 void COrderBookPanel::DrawNetRatioPeriods(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo)
 {
 	auto stockId = stockInfo.code;
 	auto stockDataPtr = g_data.GetStockData(stockInfo.code);
-	const int netPeriods[] = { 1, 5, 10, 20 };
+	const int netPeriods[] = { 5, 30 };
 
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 2; i++)
 	{
-		int periodBarY = lc.RowY(11 + i);
+		int periodBarY = lc.RowY(13 + i);
 		int periodBarH = lc.rowHeight;
 		CString periodLabel;
 		periodLabel.Format(_T("净比%02d:"), netPeriods[i]);
@@ -445,7 +446,7 @@ void COrderBookPanel::DrawNetRatioPeriods(CDC& memDC, const LayoutContext& lc, c
 		double ratio = 0;
 		bool hasData = stockDataPtr && stockDataPtr->GetInnerOuterNetDiff(netPeriods[i], diff, ratio);
 		if (hasData)
-			periodLabelColor = diff > 0 ? COLOR_RED_UP : (diff < 0 ? COLOR_GREEN_DOWN : COLOR_BLACK);
+			periodLabelColor = ratio > 0 ? COLOR_RED_UP : (ratio < 0 ? COLOR_GREEN_DOWN : COLOR_BLACK);
 		memDC.SetTextColor(periodLabelColor);
 		memDC.TextOut(lc.textX, periodBarY + max(0, (periodBarH - memDC.GetTextExtent(periodLabel).cy) / 2), periodLabel);
 
@@ -454,7 +455,7 @@ void COrderBookPanel::DrawNetRatioPeriods(CDC& memDC, const LayoutContext& lc, c
 		if (periodBarW <= 0)
 			continue;
 
-		DrawRatioBar(memDC, periodBarX, periodBarY, periodBarW, periodBarH, ratio, diff);
+		DrawRatioBar(memDC, periodBarX, periodBarY, periodBarW, periodBarH, ratio);
 
 		CString periodTxt;
 		CString periodDiffTxt;
@@ -599,7 +600,7 @@ void COrderBookPanel::DrawNetRatio99(CDC& memDC, const LayoutContext& lc, const 
 	int barW = lc.right - barX - g_data.RDPI(4);
 	if (barW > 0)
 	{
-		DrawRatioBar(memDC, barX, barY, barW, barH, netRatio, netDiff);
+		DrawRatioBar(memDC, barX, barY, barW, barH, netRatio);
 
 		CString diffSign = netDiff >= 0 ? _T("+") : _T("-");
 		CString netRatioTxt;
@@ -705,7 +706,7 @@ void COrderBookPanel::DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, 
 	memDC.SelectObject(oldFont);
 }
 
-void COrderBookPanel::DrawRatioBar(CDC& memDC, int x, int y, int w, int h, double ratio, STOCK::Volume diff)
+void COrderBookPanel::DrawRatioBar(CDC& memDC, int x, int y, int w, int h, double ratio)
 {
 	if (w <= 0)
 		return;
@@ -717,12 +718,12 @@ void COrderBookPanel::DrawRatioBar(CDC& memDC, int x, int y, int w, int h, doubl
 	fillW = min(fillW, halfW);
 	memDC.FillSolidRect(x, y, w, h, RGB(230, 230, 230));
 	int dominantW = min(w, halfW + fillW);
-	if (diff > 0)
+	if (ratio > 0)
 	{
 		memDC.FillSolidRect(x, y, dominantW, h, redColor);
 		memDC.FillSolidRect(x + dominantW, y, w - dominantW, h, greenColor);
 	}
-	else if (diff < 0)
+	else if (ratio < 0)
 	{
 		memDC.FillSolidRect(x, y, dominantW, h, greenColor);
 		memDC.FillSolidRect(x + dominantW, y, w - dominantW, h, redColor);

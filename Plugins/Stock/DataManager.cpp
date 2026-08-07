@@ -207,7 +207,7 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
 
 	m_db_mgr.Init(m_config_path);
 	m_db_mgr.CleanExpiredData();
-	m_db_mgr.CleanExpiredAvgDiffStats();
+	//m_db_mgr.CleanExpiredAvgDiffStats();
 	LoadTodayInnerOuterSnapshots();
 	LoadChipDistributions();
 	LoadStockBasicData();
@@ -863,15 +863,25 @@ void CDataManager::CheckAndResetAvgDiffDaily()
 	if (m_avg_diff_last_date.empty())
 	{
 		m_avg_diff_last_date = dateStr;
+		// 首次启动时设置待重置，确保数据库加载的旧记录在交易时段开始后被清零
+		m_avg_diff_reset_pending = true;
 		return;
 	}
 
+	// 跨天时标记待重置，不立即清零
+	// 避免开盘前获取到昨日数据导致均幅记录被污染
 	if (m_avg_diff_last_date != dateStr)
 	{
-		// 跨天了，清零所有均幅记录和历史队列
+		m_avg_diff_last_date = dateStr;
+		m_avg_diff_reset_pending = true;
+	}
+
+	// 等到交易时段（获取到今日数据）才执行重置
+	if (m_avg_diff_reset_pending && IsTradingDaySession())
+	{
 		m_avg_diff_stats.clear();
 		m_avg_diff_history.clear();
-		m_avg_diff_last_date = dateStr;
+		m_avg_diff_reset_pending = false;
 	}
 }
 

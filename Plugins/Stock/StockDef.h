@@ -457,58 +457,79 @@ namespace STOCK
 		bool isAskSide{ true };       // true=卖方，false=买方
 	};
 
-	// 内外盘5秒快照环形缓存池（20分钟=240条）
-		// 1分钟取最新12条, 5分钟取最新60条, 10分钟取最新120条, 20分钟取最新240条
+	// 内外盘2秒采样数据（增量净比+增量成交量）
 	struct VolumeSample {
-		time_t timestamp;       // 真实时间戳
-		Volume innerVolume;
-		Volume outerVolume;
+		double netRatio;      // 增量净比 (Δ外-Δ内)/(Δ外+Δ内)*100
+		Volume deltaVol;      // 增量成交量 (Δ外+Δ内)
+		VolumeSample() : netRatio(0), deltaVol(0) {}
+		VolumeSample(double r, Volume v) : netRatio(r), deltaVol(v) {}
 	};
 
 	struct VolumePool {
-		std::vector<VolumeSample> samples;
-		int head{ 0 };       // 环形缓冲区头指针（最旧数据位置）
-		int count{ 0 };      // 当前有效数据量
-		int capacity{ 0 };   // 缓冲区容量
+		std::map<time_t, VolumeSample> samples;  // 按时间戳索引的采样数据
+		int capacity{ 0 };   // 最大保留条数
 		void Init(int cap)
 		{
 			capacity = cap;
-			samples.resize(capacity);
-			head = 0;
-			count = 0;
+			samples.clear();
 		}
 		void Clear()
 		{
-			head = 0;
-			count = 0;
+			samples.clear();
 		}
-		void Push(const VolumeSample& sample)
+		// 添加采样数据（时间戳去重）
+		void Push(time_t t, const VolumeSample& sample)
 		{
-			if (count < capacity)
-			{
-				samples[count] = sample;
-				count++;
-			}
-			else
-			{
-				samples[head] = sample;
-				head = (head + 1) % capacity;
-			}
+			samples[t] = sample;
+			// 超出容量时删除最旧的
+			while (static_cast<int>(samples.size()) > capacity)
+				samples.erase(samples.begin());
 		}
 		// 获取最新样本
-		const VolumeSample* Newest() const
+		bool Newest(VolumeSample& out) const
 		{
-			if (count == 0) return nullptr;
-			int idx = (head + count - 1) % capacity;
-			return &samples[idx];
+			if (samples.empty()) return false;
+			auto it = samples.rbegin();
+			out = it->second;
+			return true;
 		}
 		// 获取倒数第N个样本（0=最新，1=次新，...）
-		const VolumeSample* FromEnd(int n) const
+		bool FromEnd(int n, VolumeSample& out) const
 		{
-			if (n < 0 || n >= count) return nullptr;
-			int idx = (head + count - 1 - n) % capacity;
-			if (idx < 0) idx += capacity;
-			return &samples[idx];
+			if (n < 0 || n >= static_cast<int>(samples.size())) return false;
+			auto it = samples.rbegin();
+			std::advance(it, n);
+			out = it->second;
+			return true;
+		}
+		// 获取倒数第N个的时间戳
+		bool FromEndTime(int n, time_t& out) const
+		{
+			if (n < 0 || n >= static_cast<int>(samples.size())) return false;
+			auto it = samples.rbegin();
+			std::advance(it, n);
+			out = it->first;
+			return true;
+		}
+		// 获取指定时间范围内的加权平均净比和总增量成交量
+		bool GetRangeAvg(time_t fromTime, double& avgRatio, Volume& totalDeltaVol) const
+		{
+			avgRatio = 0;
+			totalDeltaVol = 0;
+			auto it = samples.lower_bound(fromTime);
+			Volume weightedSum = 0;
+			for (; it != samples.end(); ++it)
+			{
+				Volume dv = it->second.deltaVol;
+				if (dv > 0)
+				{
+					weightedSum += static_cast<Volume>(it->second.netRatio * dv);
+					totalDeltaVol += dv;
+				}
+			}
+			if (totalDeltaVol <= 0) return false;
+			avgRatio = static_cast<double>(weightedSum) / totalDeltaVol;
+			return true;
 		}
 	};
 
@@ -642,6 +663,9 @@ namespace STOCK
 		VolumePool minVolumePool;  // 分钟缓存池（30条=30分钟1分采样）
 		time_t lastSampleTime{ 0 }; // 上次采样时间（2秒间隔去重）
 		time_t lastSaveTime{ 0 };   // 上次持久化时间（5秒间隔）
+		time_t lastMinSampleTime{ 0 }; // 上次分钟级采样时间（1分钟间隔）
+		Volume lastInnerVolume{ 0 };  // 上次采样的内盘累计值（用于算增量）
+		Volume lastOuterVolume{ 0 };  // 上次采样的外盘累计值（用于算增量）
 
 		void InitVolumePools()
 		{
@@ -649,6 +673,9 @@ namespace STOCK
 			minVolumePool.Init(30);
 			lastSampleTime = 0;
 			lastSaveTime = 0;
+			lastMinSampleTime = 0;
+			lastInnerVolume = 0;
+			lastOuterVolume = 0;
 		}
 		void ClearVolumePools()
 		{
@@ -656,6 +683,9 @@ namespace STOCK
 			minVolumePool.Clear();
 			lastSampleTime = 0;
 			lastSaveTime = 0;
+			lastMinSampleTime = 0;
+			lastInnerVolume = 0;
+			lastOuterVolume = 0;
 		}
 		// 添加2秒采样数据，返回是否入池
 		bool AddVolumeSample(time_t t, Volume inner, Volume outer)
@@ -664,9 +694,46 @@ namespace STOCK
 			time_t sampleTime = t - t % 2;
 			if (sampleTime <= 0 || sampleTime == lastSampleTime)
 				return false;
-			lastSampleTime = sampleTime;
 
-			secVolumePool.Push({ sampleTime, inner, outer });
+			// 计算增量
+			Volume deltaInner = inner - lastInnerVolume;
+			Volume deltaOuter = outer - lastOuterVolume;
+			Volume deltaTotal = deltaInner + deltaOuter;
+
+			double netRatio = 0;
+			if (deltaTotal > 0)
+				netRatio = static_cast<double>(deltaOuter - deltaInner) / deltaTotal * 100;
+
+			// 首次采样不存数据（没有增量基准），只记录基准值
+			if (lastSampleTime == 0)
+			{
+				lastSampleTime = sampleTime;
+				lastInnerVolume = inner;
+				lastOuterVolume = outer;
+				return false;
+			}
+
+			lastSampleTime = sampleTime;
+			lastInnerVolume = inner;
+			lastOuterVolume = outer;
+
+			secVolumePool.Push(sampleTime, VolumeSample(netRatio, deltaTotal));
+
+			// 分钟级聚合：每1分钟将secVolumePool中该分钟的数据聚合后入minVolumePool
+			time_t minTime = sampleTime - sampleTime % 60;  // 对齐到分钟
+			if (minTime > 0 && minTime != lastMinSampleTime)
+			{
+				lastMinSampleTime = minTime;
+				// 聚合上一分钟的数据（minTime-60 ~ minTime）
+				time_t prevMinStart = minTime - 60;
+				double avgRatio = 0;
+				Volume totalDeltaVol = 0;
+				if (secVolumePool.GetRangeAvg(prevMinStart, avgRatio, totalDeltaVol))
+				{
+					minVolumePool.Push(minTime, VolumeSample(avgRatio, totalDeltaVol));
+				}
+			}
+
 			return true;
 		}
 		// 判断是否需要持久化（10秒间隔）
@@ -683,85 +750,105 @@ namespace STOCK
 		void UpdateVolumeSample();
 		void UpdateOrderPriceAccum();  // 更新五档挂单变化量（+N/-N）
 
-		// 从缓存池获取净差和净比（minutes: 1/5/10/20）
+		// 从secVolumePool获取加权平均净比和净差（minutes: 1/5/10/20）
+		// 不足目标条数时有多少根就计算多少根
+		bool GetSecNetDiff(int minutes, Volume& diff, double& ratio) const
+		{
+			if (secVolumePool.samples.empty())
+				return false;
+
+			time_t newestTime;
+			if (!secVolumePool.FromEndTime(0, newestTime))
+				return false;
+			time_t fromTime = newestTime - minutes * 60;
+
+			double avgRatio = 0;
+			Volume totalDeltaVol = 0;
+			if (!secVolumePool.GetRangeAvg(fromTime, avgRatio, totalDeltaVol))
+				return false;
+
+			ratio = avgRatio;
+			diff = static_cast<Volume>(totalDeltaVol * avgRatio / 100);
+			return true;
+		}
+
+		// 从minVolumePool获取加权平均净比和净差（minutes: 5/30）
 		// 不足目标条数时有多少根就计算多少根
 		bool GetInnerOuterNetDiff(int minutes, Volume& diff, double& ratio) const
 		{
-			if (secVolumePool.count < 2)
+			if (minVolumePool.samples.empty())
 				return false;
 
-			int sampleCount = min(minutes * 30, secVolumePool.count);
-			const VolumeSample* newest = secVolumePool.FromEnd(0);
-			const VolumeSample* oldest = secVolumePool.FromEnd(sampleCount - 1);
-			if (!newest || !oldest)
+			// 获取最新时间戳，往前推 minutes*60 秒
+			time_t newestTime;
+			if (!minVolumePool.FromEndTime(0, newestTime))
+				return false;
+			time_t fromTime = newestTime - minutes * 60;
+
+			double avgRatio = 0;
+			Volume totalDeltaVol = 0;
+			if (!minVolumePool.GetRangeAvg(fromTime, avgRatio, totalDeltaVol))
 				return false;
 
-			Volume inner = newest->innerVolume - oldest->innerVolume;
-			Volume outer = newest->outerVolume - oldest->outerVolume;
-			if (inner < 0 || outer < 0)
-				return false;
-
-			diff = outer - inner;
-			Volume total = inner + outer;
-			ratio = total > 0 ? static_cast<double>(diff) / total * 100 : 0;
-			return total > 0;
+			ratio = avgRatio;
+			// 净差 = 总增量成交量 * 加权平均净比 / 100
+			diff = static_cast<Volume>(totalDeltaVol * avgRatio / 100);
+			return true;
 		}
 
-		// 获取前一次净差
+		// 获取前一次加权平均净比（去掉最新一条采样）
 		bool GetPreviousInnerOuterNetDiff(int minutes, Volume& diff, double& ratio) const
 		{
-			if (secVolumePool.count < 3)
+			if (minVolumePool.samples.size() < 2)
 				return false;
 
-			int sampleCount = min(minutes * 30, secVolumePool.count - 1);
-			const VolumeSample* prevNewest = secVolumePool.FromEnd(1);
-			const VolumeSample* prevOldest = secVolumePool.FromEnd(sampleCount);
-			if (!prevNewest || !prevOldest)
+			// 获取倒数第2条的时间戳，往前推 minutes*60 秒
+			time_t prevTime;
+			if (!minVolumePool.FromEndTime(1, prevTime))
 				return false;
+			time_t fromTime = prevTime - minutes * 60;
 
-			Volume inner = prevNewest->innerVolume - prevOldest->innerVolume;
-			Volume outer = prevNewest->outerVolume - prevOldest->outerVolume;
-			if (inner < 0 || outer < 0)
-				return false;
-
-			diff = outer - inner;
-			Volume total = inner + outer;
-			ratio = total > 0 ? static_cast<double>(diff) / total * 100 : 0;
-			return total > 0;
+			double avgRatio = 0;
+			Volume totalDeltaVol = 0;
+			// 取 fromTime ~ prevTime 范围（不含最新一条）
+			auto itEnd = minVolumePool.samples.upper_bound(prevTime);
+			auto itStart = minVolumePool.samples.lower_bound(fromTime);
+			Volume weightedSum = 0;
+			for (auto it = itStart; it != itEnd; ++it)
+			{
+				Volume dv = it->second.deltaVol;
+				if (dv > 0)
+				{
+					weightedSum += static_cast<Volume>(it->second.netRatio * dv);
+					totalDeltaVol += dv;
+				}
+			}
+			if (totalDeltaVol <= 0) return false;
+			ratio = static_cast<double>(weightedSum) / totalDeltaVol;
+			diff = static_cast<Volume>(totalDeltaVol * ratio / 100);
+			return true;
 		}
 
 		bool GetPreviousInnerOuterTotalRatio(double& ratio) const
 		{
-			const VolumeSample* prev = secVolumePool.FromEnd(1);
-			if (!prev) return false;
-			Volume total = prev->innerVolume + prev->outerVolume;
-			if (total <= 0) return false;
-			ratio = static_cast<double>(prev->outerVolume - prev->innerVolume) / total * 100;
-			return true;
+			VolumeSample prev;
+			if (!secVolumePool.FromEnd(1, prev))
+				return false;
+			ratio = prev.netRatio;
+			return prev.deltaVol > 0;
 		}
 
-		// 获取最近N根5秒净比（每根=当前样本-前一个样本的差值对应的净比）
-		// 返回值从新到旧排列（index 0=最新, N-1=最旧）
+		// 获取最近N条增量净比（从新到旧排列，index 0=最新, N-1=最旧）
 		bool GetRecentNetRatios(int count, std::vector<double>& ratios) const
 		{
 			ratios.clear();
-			if (secVolumePool.count < count + 1)
+			if (static_cast<int>(secVolumePool.samples.size()) < count)
 				return false;
 			ratios.resize(count);
-			for (int i = 0; i < count; i++)
+			auto it = secVolumePool.samples.rbegin();
+			for (int i = 0; i < count; i++, ++it)
 			{
-				// 从新到旧：FromEnd(i+1) 和 FromEnd(i)
-				const VolumeSample* older = secVolumePool.FromEnd(i + 1);
-				const VolumeSample* newer = secVolumePool.FromEnd(i);
-				if (!older || !newer)
-				{
-					ratios.clear();
-					return false;
-				}
-				Volume inner = newer->innerVolume - older->innerVolume;
-				Volume outer = newer->outerVolume - older->outerVolume;
-				Volume total = inner + outer;
-				ratios[i] = total > 0 ? static_cast<double>(outer - inner) / total * 100 : 0;
+				ratios[i] = it->second.netRatio;
 			}
 			return true;
 		}

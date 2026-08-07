@@ -194,8 +194,9 @@ private:
 	// 关联股票均值历史队列: code -> deque<avg_diff>，每5秒采样一次，最多60个（5分钟）
 	std::map<std::wstring, std::deque<double>> m_avg_diff_history;
 
-	// 每日重置跟踪：记录上次更新日期，跨天时自动清零
+	// 每日重置跟踪：记录上次更新日期，跨天时标记待重置
 	std::string m_avg_diff_last_date;
+	bool m_avg_diff_reset_pending{ false };  // 跨天待重置标识，等交易时段获取到今日数据后才执行
 
 	// 东方财富接口失败缓存：WAF 拦截 WinINet 后，一段时间内不再尝试
 	// 值为失败截止时间戳（秒），0 表示未缓存

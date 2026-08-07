@@ -395,7 +395,7 @@ void CStockFetchThread::Run()
 				m_callAuction_busy = false;
 			else if (!isBackgroundTask)
 				m_busy = false;
-			// UI刷新由实时行情线程统一驱动，此处仅更新数据
+			// UI刷新由浮动窗口2秒定时器统一驱动，此处仅更新数据
 			continue;
 		}
 
@@ -466,7 +466,7 @@ void CStockFetchThread::Run()
 				std::lock_guard<std::mutex> lock(m_mutex);
 				m_chart_last_fetch[chartType] = time(nullptr);
 			}
-			// UI刷新由实时行情线程统一驱动，此处仅更新数据
+			// UI刷新由浮动窗口2秒定时器统一驱动，此处仅更新数据
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
@@ -571,11 +571,10 @@ void CStockFetchThread::RunRealtime()
 				CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
 			}			
 
-			// 共享内存获取成功后立即刷新UI，并更新时间戳
+			// 共享内存获取成功后更新时间戳
 			// 这样下一次2秒间隔从共享内存获取时刻算起，不被HTTP阻塞
 			if (tcpOk)
 			{
-				Stock::Instance().NotifyFloatingWndUpdate();
 				m_realtime_last_fetch = time(nullptr);
 			}
 
@@ -586,7 +585,6 @@ void CStockFetchThread::RunRealtime()
 			{
 				PostBackgroundTask([tcpOk]() {
 					g_data.RequestRealtimeData(tcpOk);
-					Stock::Instance().NotifyFloatingWndUpdate();
 					});
 			}
 

@@ -786,15 +786,13 @@ AvgDiffStats CStockDbManager::LoadAvgDiffStats(const std::wstring& stockCode)
 	if (m_db == nullptr) return result;
 
 	std::string code(stockCode.begin(), stockCode.end());
-	std::string today = GetTodayDateString();
 
-	// 只加载今天的记录，非今天的视为过期，每日开盘后重新记录
-	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? AND update_time = ?;";
+	// 加载最近一条记录（按 update_time 降序），非交易时间重启可显示上次的最低/最高
+	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? ORDER BY update_time DESC LIMIT 1;";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
 		sqlite3_bind_text(stmt, 1, code.c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_bind_text(stmt, 2, today.c_str(), -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW)
 		{
 			result.minVal = sqlite3_column_double(stmt, 0);
@@ -810,23 +808,13 @@ void CStockDbManager::CleanExpiredAvgDiffStats()
 {
 	if (m_db == nullptr) return;
 
-	// 删除7天前的过期数据
+	// 只删除7天前的过期数据，保留昨天的记录（非交易时间重启可显示最近的最低/最高）
 	std::string cutoffDate = GetCacheCutoffDateString();
-	const char* sql1 = "DELETE FROM avg_diff_stats WHERE update_time < ?;";
+	const char* sql = "DELETE FROM avg_diff_stats WHERE update_time < ?;";
 	sqlite3_stmt* stmt = nullptr;
-	if (sqlite3_prepare_v2(m_db, sql1, -1, &stmt, nullptr) == SQLITE_OK)
+	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
 		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_step(stmt);
-	}
-	sqlite3_finalize(stmt);
-
-	// 删除非今天的记录（确保每天开盘从零开始）
-	std::string today = GetTodayDateString();
-	const char* sql2 = "DELETE FROM avg_diff_stats WHERE update_time != ?;";
-	if (sqlite3_prepare_v2(m_db, sql2, -1, &stmt, nullptr) == SQLITE_OK)
-	{
-		sqlite3_bind_text(stmt, 1, today.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 	}
 	sqlite3_finalize(stmt);
