@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "ChartContext.h"
+#include "Common.h"
 #include <StockDef.h>
 
 // 走势图绘制模块
@@ -10,9 +11,7 @@ class CTimelineChart
 public:
 	// 走势图悬停/交互状态
 	struct HoverState {
-		bool isKLineMode{ false };
-		bool isMin5KLineMode{ false };
-		bool isMin30KLineMode{ false };
+		UIViewMode viewMode{ UI_VIEW_TIMELINE };
 		bool isHoveringVolume{ false };
 		int hoveredBarIndex{ -1 };
 		STOCK::TimelinePoint hoveredData;
@@ -28,11 +27,9 @@ public:
 		bool showJZCurve{ false };
 		bool showMA{ false };
 		bool showBollBands{ true };
-		bool showAmplitudeBands{ false };
 		bool showTrendView{ false };
 		bool showChipPeak{ false };
 		bool expandedMode{ false };
-		bool isCallAuctionMode{ false };
 		int klinePeriodDays{ 250 };
 		int scrollOffset{ 0 };
 		int timelineScrollOffset{ -1 };

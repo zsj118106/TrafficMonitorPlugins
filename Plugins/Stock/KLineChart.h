@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "ChartContext.h"
+#include "Common.h"
 #include "StockIndicator.h"
 #include <StockDef.h>
 
@@ -23,10 +24,8 @@ public:
 		CString kdjHoverTip;
 		bool showMA{ false };
 		bool showBollBands{ true };
-		bool showAmplitudeBands{ false };
 		bool showTrendView{ false };
-		bool isMin5KLineMode{ false };
-		bool isMin30KLineMode{ false };
+		UIViewMode viewMode{ UI_VIEW_DAY_KLINE };
 		int klinePeriodDays{ 250 };
 		int scrollOffset{ 0 };
 		std::wstring stockId;

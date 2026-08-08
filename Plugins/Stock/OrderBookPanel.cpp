@@ -26,7 +26,7 @@ std::map<std::wstring, std::map<int, CString>> COrderBookPanel::m_lastPeriodRati
 
 void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
 	const std::vector<STOCK::KLinePoint>& klineData,
-	ChartViewMode viewMode)
+	UIViewMode viewMode)
 {
 	const int MAX_LEVEL = STOCK::StockInfo::MAX_LEVEL;
 	// 布局：0=委比, 1=趋势, 2=最高/最低, 3-7=卖五~卖一, 8-12=买一~买五, 13-14=净比05/30, 15=净比99, 16=振幅, 17=换手率
@@ -117,7 +117,7 @@ void COrderBookPanel::DrawWeiBi(CDC& memDC, const LayoutContext& lc, const STOCK
 // 绘制趋势判定（行1）
 // ============================================================================
 void COrderBookPanel::DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo,
-	ChartViewMode viewMode)
+	UIViewMode viewMode)
 {
 	auto stockDataForTrend = g_data.GetStockData(stockInfo.code);
 
@@ -165,7 +165,7 @@ void COrderBookPanel::DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK
 		}
 
 		// 当前视图趋势
-		if (viewMode == CHART_VIEW_MIN30_KLINE)
+		if (viewMode == UI_VIEW_MIN30_KLINE)
 		{
 			if (valid30)
 			{
@@ -184,7 +184,7 @@ void COrderBookPanel::DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK
 				validCur = true;
 			}
 		}
-		else if (viewMode == CHART_VIEW_MIN5_KLINE)
+		else if (viewMode == UI_VIEW_MIN5_KLINE)
 		{
 			if (valid5)
 			{
@@ -192,7 +192,7 @@ void COrderBookPanel::DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK
 				validCur = true;
 			}
 		}
-		else if (viewMode == CHART_VIEW_TIMELINE)
+		else if (viewMode == UI_VIEW_TIMELINE)
 		{
 			auto* tlObj = stockDataForTrend->getTimelineData();
 			if (tlObj && tlObj->data.size() >= 10)

@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include <StockDef.h>
+#include <Common.h>
 #include <vector>
 
 // 筹码峰面板绘制
@@ -15,8 +16,8 @@ public:
 	// 绘制筹码峰面板
 	// left, right: 面板左右边界（含主标题栏下方的盘口标题栏区域）
 	// height: 面板总高度（含盘口标题栏）
-	// isKLineMode: 是否处于K线模式（K线模式下跳过筹码衰减修正）
+	// viewMode: 当前视图模式（K线模式下跳过筹码衰减修正）
 	void Draw(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
 		const STOCK::ChipDistribution& chipData, const std::vector<STOCK::TimelinePoint>& timelinePoint,
-		bool isKLineMode);
+		UIViewMode viewMode);
 };

@@ -49,7 +49,6 @@ protected:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnRButtonDown(UINT nFlags, CPoint point);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
-	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnDestroy();
 	LRESULT OnUpdateStatus(WPARAM wParam, LPARAM lParam);
 	LRESULT OnCloseWindow(WPARAM wParam, LPARAM lParam);
@@ -81,7 +80,6 @@ private:
 	void ResetHoverState();           // 重置所有悬停状态
 	void SetTimelineModeDefaults();   // 设置分时模式默认参数
 	void SetDayKLineModeDefaults();   // 设置日K模式默认参数
-	ChartViewMode GetChartViewMode() const;  // 根据3个bool获取当前视图模式
 	void SetMin5KLineModeDefaults();  // 设置5分钟K线模式默认参数
 	void SetMin30KLineModeDefaults(); // 设置30分钟K线模式默认参数
 	static void SafeSetWindowPos(CWnd& wnd, int x, int y, int cx, int cy);
@@ -131,12 +129,8 @@ private:
 	CButton m_btnChipPeak;       // 筹码峰按钮
 	CButton m_btnOrderBook;      // 盘口按钮（与筹码峰按钮切换）
 	CFont m_chipPeakFont;        // 筹码峰按钮小字体
-	CScrollBar m_hScrollBar;
 	std::wstring m_stock_id;
-	bool m_isKLineMode{};
-	bool m_isMin5KLineMode{};  // 5分钟K线模式（m_isKLineMode为true时的子模式）
-	bool m_isMin30KLineMode{};  // 30分钟K线模式（m_isKLineMode为true时的子模式）
-	bool m_isOverviewMode{};
+	UIViewMode m_viewMode{ UI_VIEW_TIMELINE };  // 当前界面视图模式
 	bool m_klineDataLoaded{ false };
 	int m_klinePeriodDays{ 250 };
 	int m_scrollOffset{ 0 };
@@ -196,11 +190,9 @@ private:
 	bool m_showChipPeak{ false };
 	bool m_expandedMode{ false };  // 放大模式：隐藏副图，走势图3/4+成交量1/4
 	bool m_showStockList{ true };  // 是否显示左侧股票列表面板
-	bool m_isCallAuctionMode{ false };  // 集合竞价模式
 	bool m_showJZCurve{ false };  // 基金净值曲线
 	bool m_showMA{ false };
 	bool m_showBollBands{ true };
-	bool m_showAmplitudeBands{ false };  // 振幅上下线（与布林带互斥）
 	volatile bool m_chartDirty{ false };  // 图表数据更新标识，由PostMessage设置，定时器检查
 	int m_klineHoveredBarIndex{ -1 };
 	CString m_klineHoverTip;

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SmartSignalTestDlg.h"
+#include "Common.h"
 #include "DataManager.h"
 #include <Stock.h>
 #include <algorithm>
@@ -40,7 +41,7 @@ CString CSmartSignalTestDlg::Signal5mToText(STOCK::Signal5m signal)
 }
 
 void CSmartSignalTestDlg::Show(const std::wstring& stockId, int timelineIndex,
-	bool isKLineMode, bool isMin5KLineMode,
+	UIViewMode viewMode,
 	double pendingTradePrice, const CString& pendingTradeTime,
 	CWnd* pParentWnd)
 {
@@ -77,7 +78,7 @@ void CSmartSignalTestDlg::Show(const std::wstring& stockId, int timelineIndex,
 				allBars30.push_back(STOCK::Bar::FromKLinePoint(kp));
 		}
 		// 分时图模式获取分时数据
-		if (!isKLineMode)
+		if (viewMode < UI_VIEW_MIN5_KLINE)
 		{
 			auto timelineObj = stockData->getTimelineData();
 			if (timelineObj)
@@ -86,7 +87,7 @@ void CSmartSignalTestDlg::Show(const std::wstring& stockId, int timelineIndex,
 	}
 
 	// 分时图模式：使用1分钟粒度信号
-	if (!isKLineMode && timelineData.size() >= 120 && !allBars30.empty())
+	if (viewMode < UI_VIEW_MIN5_KLINE && timelineData.size() >= 120 && !allBars30.empty())
 	{
 		std::vector<STOCK::Bar> bars1m = CSignalAnalyzer::ConvertTimelineToBars(timelineData);
 		int barIndex = max(0, min(timelineIndex, static_cast<int>(bars1m.size()) - 1));
@@ -312,7 +313,7 @@ void CSmartSignalTestDlg::Show(const std::wstring& stockId, int timelineIndex,
 			break;
 	}
 	int barIndex = -1;
-	if (isMin5KLineMode)
+	if (viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		barIndex = max(0, min(timelineIndex, static_cast<int>(allBars5.size()) - 1));
 	}

@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "ChipPeakPanel.h"
 #include "ChartColors.h"
 #include "Common.h"
@@ -9,7 +9,7 @@
 
 void CChipPeakPanel::Draw(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
 	const STOCK::ChipDistribution& chipData, const std::vector<STOCK::TimelinePoint>& timelinePoint,
-	bool isKLineMode)
+	UIViewMode viewMode)
 {
 	// 按比例分配行高，与盘口面板一致
 	const int totalRows = 19;
@@ -45,7 +45,7 @@ void CChipPeakPanel::Draw(CDC& memDC, int left, int right, int height, const STO
 	}
 
 	std::vector<STOCK::ChipPoint> points = chipData.points;
-	if (!isKLineMode && stockInfo.circulatingAShares > 0 && !timelinePoint.empty())
+	if (viewMode < UI_VIEW_MIN5_KLINE && stockInfo.circulatingAShares > 0 && !timelinePoint.empty())
 	{
 		const double CHIP_ATTRITION_N = 1.3;
 		const double MAX_EFFECT_TURN = 0.85;

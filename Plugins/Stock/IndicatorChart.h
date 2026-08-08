@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChartContext.h"
+#include "Common.h"
 #include "StockIndicator.h"
 #include <StockDef.h>
 
@@ -24,9 +25,7 @@ public:
     struct HoverState {
         bool isHoveringVolume{ false };
         int hoveredBarIndex{ -1 };
-        bool isMin5KLineMode{ false };
-        bool isMin30KLineMode{ false };
-        bool isKLineMode{ false };
+        UIViewMode viewMode{ UI_VIEW_TIMELINE };
         CString timelineMacdTitleTip;
         CString timelineKdjTitleTip;
         CString timelineWrTitleTip;

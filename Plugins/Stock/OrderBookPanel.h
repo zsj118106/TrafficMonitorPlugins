@@ -3,15 +3,7 @@
 #include <StockDef.h>
 #include <string>
 #include <vector>
-
-// 图表视图模式
-enum ChartViewMode
-{
-	CHART_VIEW_TIMELINE = 0,  // 分时图
-	CHART_VIEW_DAY_KLINE,     // 日K线
-	CHART_VIEW_MIN5_KLINE,    // 5分钟K线
-	CHART_VIEW_MIN30_KLINE,   // 30分钟K线
-};
+#include "Common.h"
 
 // 盘口面板绘制
 // 职责：在指定矩形区域内绘制五档买卖盘、委比、趋势判定、净比(1/5/10/20/99)、
@@ -27,7 +19,7 @@ public:
 	// viewMode: 当前视图模式（用于趋势判定）
 	void Draw(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
 		const std::vector<STOCK::KLinePoint>& klineData,
-		ChartViewMode viewMode);
+		UIViewMode viewMode);
 
 private:
 	// 盘口行数据
@@ -79,7 +71,7 @@ private:
 	void DrawWeiBi(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
 	// 绘制趋势判定（行1）
-	void DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, ChartViewMode viewMode);
+	void DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, UIViewMode viewMode);
 
 	// 绘制卖盘行（最高+卖三~卖一，行2-5）
 	void DrawAskRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, bool blinkOn);

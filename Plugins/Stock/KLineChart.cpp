@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "KLineChart.h"
 #include "ChartColors.h"
 #include "Common.h"
@@ -564,87 +564,6 @@ void CKLineChart::DrawKLineChart(CDC& memDC, int x, int y, int w, int h, const s
 	{
 		DrawBollBands(memDC, drawData);
 	}
-	// 振幅上下线：在K线图中绘制振幅曲线（仅当 showAmplitudeBands 开启时）
-	if (hover.showAmplitudeBands)
-	{
-		auto stockData = g_data.GetStockData(hover.stockId);
-		auto* dayKLineObj = stockData ? stockData->getKLineData() : nullptr;
-		double avgAmplitude = dayKLineObj ? dayKLineObj->CalculateAverageAmplitude(5) : 0;
-		if (avgAmplitude > 0)
-		{
-			double ampRatio = avgAmplitude / 100.0 / 2.0;
-
-			// 获取分时均价数据
-			auto* tlObj = stockData ? stockData->getTimelineData() : nullptr;
-			if (tlObj && !tlObj->data.empty() && drawData.klineData && !drawData.klineData->empty())
-			{
-				const auto& klineRef = *drawData.klineData;
-				int n = (int)klineRef.size();
-				auto priceToY = [&](double price) -> int {
-					int py = drawData.y + static_cast<int>((drawData.maxPrice - price) * drawData.unitY);
-					return max(drawData.y, min(py, drawData.y + drawData.h));
-					};
-
-				// 绘制振幅上轨曲线（红色）
-				{
-					CPen upperPen(PS_SOLID, 1, COLOR_RED_UP);
-					memDC.SelectObject(&upperPen);
-					bool first = true;
-					for (int i = drawData.finalStartIndex; i < n && i < drawData.finalStartIndex + drawData.displayCount; i++)
-					{
-						// 将日K收盘价作为"均价"近似值来计算振幅上下轨
-						double avgP = klineRef[i].close;
-						if (avgP <= 0) { first = true; continue; }
-						double upperPrice = avgP * (1 + ampRatio);
-						int barX = drawData.x + (i - drawData.finalStartIndex) * (drawData.barWidth + drawData.gap);
-						int py = priceToY(upperPrice);
-						if (first) { memDC.MoveTo(barX + drawData.barWidth / 2, py); first = false; }
-						else { memDC.LineTo(barX + drawData.barWidth / 2, py); }
-					}
-				}
-				// 绘制振幅下轨曲线（绿色）
-				{
-					CPen lowerPen(PS_SOLID, 1, COLOR_GREEN_DOWN);
-					memDC.SelectObject(&lowerPen);
-					bool first = true;
-					for (int i = drawData.finalStartIndex; i < n && i < drawData.finalStartIndex + drawData.displayCount; i++)
-					{
-						double avgP = klineRef[i].close;
-						if (avgP <= 0) { first = true; continue; }
-						double lowerPrice = avgP * (1 - ampRatio);
-						int barX = drawData.x + (i - drawData.finalStartIndex) * (drawData.barWidth + drawData.gap);
-						int py = priceToY(lowerPrice);
-						if (first) { memDC.MoveTo(barX + drawData.barWidth / 2, py); first = false; }
-						else { memDC.LineTo(barX + drawData.barWidth / 2, py); }
-					}
-				}
-			}
-
-			// 在右端标注价格（基于分时最后均价）
-			double lastAvgP = 0;
-			if (tlObj && !tlObj->data.empty())
-				lastAvgP = tlObj->data.back().averagePrice;
-			if (lastAvgP <= 0 && drawData.stockInfo)
-				lastAvgP = drawData.stockInfo->currentPrice;
-			if (lastAvgP > 0)
-			{
-				auto priceToY = [&](double price) -> int {
-					int py = drawData.y + static_cast<int>((drawData.maxPrice - price) * drawData.unitY);
-					return max(drawData.y, min(py, drawData.y + drawData.h));
-					};
-				CString upperLabel, lowerLabel;
-				upperLabel.Format(_T("%.2f"), lastAvgP * (1 + ampRatio));
-				lowerLabel.Format(_T("%.2f"), lastAvgP * (1 - ampRatio));
-				int labelX = drawData.x + drawData.w + 2;
-				int upperY = priceToY(lastAvgP * (1 + ampRatio));
-				int lowerY = priceToY(lastAvgP * (1 - ampRatio));
-				memDC.SetTextColor(COLOR_RED_UP);
-				memDC.TextOut(labelX, upperY - memDC.GetTextExtent(upperLabel).cy / 2, upperLabel);
-				memDC.SetTextColor(COLOR_GREEN_DOWN);
-				memDC.TextOut(labelX, lowerY - memDC.GetTextExtent(lowerLabel).cy / 2, lowerLabel);
-			}
-		}
-	}
 	DrawKLineBars(memDC, drawData, hover);
 	DrawKLineBuyMarkers(memDC, drawData, hover);
 	DrawKLinePeriodMarkers(memDC, drawData, periodHighs, periodLows);
@@ -659,7 +578,7 @@ void CKLineChart::DrawKLineChart(CDC& memDC, int x, int y, int w, int h, const s
 
 	DrawKLineMonthLabels(memDC, drawData, labelInfos);
 	// 5分钟/30分钟K线模式：在 X 轴标签区域绘制整点时间线
-	if (hover.isMin5KLineMode || hover.isMin30KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE)
 	{
 		DrawMin5HourLines(memDC, drawData);
 	}
@@ -943,84 +862,6 @@ void CKLineChart::DrawKLineTrendChart(CDC& memDC, int x, int y, int w, int h, co
 	if (hover.showBollBands)
 	{
 		DrawBollBands(memDC, drawData);
-	}
-	// 振幅上下线（仅当 showAmplitudeBands 开启时）
-	if (hover.showAmplitudeBands)
-	{
-		auto stockData = g_data.GetStockData(hover.stockId);
-		auto* dayKLineObj = stockData ? stockData->getKLineData() : nullptr;
-		double avgAmplitude = dayKLineObj ? dayKLineObj->CalculateAverageAmplitude(5) : 0;
-		if (avgAmplitude > 0)
-		{
-			double ampRatio = avgAmplitude / 100.0 / 2.0;
-
-			auto* tlObj = stockData ? stockData->getTimelineData() : nullptr;
-			if (tlObj && !tlObj->data.empty() && drawData.klineData && !drawData.klineData->empty())
-			{
-				const auto& klineRef = *drawData.klineData;
-				int n = (int)klineRef.size();
-				auto priceToY = [&](double price) -> int {
-					int py = drawData.y + static_cast<int>((drawData.maxPrice - price) * drawData.unitY);
-					return max(drawData.y, min(py, drawData.y + drawData.h));
-					};
-
-				// 绘制振幅上轨曲线（红色）
-				{
-					CPen upperPen(PS_SOLID, 1, COLOR_RED_UP);
-					memDC.SelectObject(&upperPen);
-					bool first = true;
-					for (int i = drawData.finalStartIndex; i < n && i < drawData.finalStartIndex + drawData.displayCount; i++)
-					{
-						double avgP = klineRef[i].close;
-						if (avgP <= 0) { first = true; continue; }
-						double upperPrice = avgP * (1 + ampRatio);
-						int barX = drawData.x + (i - drawData.finalStartIndex) * (drawData.barWidth + drawData.gap);
-						int py = priceToY(upperPrice);
-						if (first) { memDC.MoveTo(barX + drawData.barWidth / 2, py); first = false; }
-						else { memDC.LineTo(barX + drawData.barWidth / 2, py); }
-					}
-				}
-				// 绘制振幅下轨曲线（绿色）
-				{
-					CPen lowerPen(PS_SOLID, 1, COLOR_GREEN_DOWN);
-					memDC.SelectObject(&lowerPen);
-					bool first = true;
-					for (int i = drawData.finalStartIndex; i < n && i < drawData.finalStartIndex + drawData.displayCount; i++)
-					{
-						double avgP = klineRef[i].close;
-						if (avgP <= 0) { first = true; continue; }
-						double lowerPrice = avgP * (1 - ampRatio);
-						int barX = drawData.x + (i - drawData.finalStartIndex) * (drawData.barWidth + drawData.gap);
-						int py = priceToY(lowerPrice);
-						if (first) { memDC.MoveTo(barX + drawData.barWidth / 2, py); first = false; }
-						else { memDC.LineTo(barX + drawData.barWidth / 2, py); }
-					}
-				}
-			}
-
-			double lastAvgP = 0;
-			if (tlObj && !tlObj->data.empty())
-				lastAvgP = tlObj->data.back().averagePrice;
-			if (lastAvgP <= 0 && drawData.stockInfo)
-				lastAvgP = drawData.stockInfo->currentPrice;
-			if (lastAvgP > 0)
-			{
-				auto priceToY = [&](double price) -> int {
-					int py = drawData.y + static_cast<int>((drawData.maxPrice - price) * drawData.unitY);
-					return max(drawData.y, min(py, drawData.y + drawData.h));
-					};
-				CString upperLabel, lowerLabel;
-				upperLabel.Format(_T("%.2f"), lastAvgP * (1 + ampRatio));
-				lowerLabel.Format(_T("%.2f"), lastAvgP * (1 - ampRatio));
-				int labelX = drawData.x + drawData.w + 2;
-				int upperY = priceToY(lastAvgP * (1 + ampRatio));
-				int lowerY = priceToY(lastAvgP * (1 - ampRatio));
-				memDC.SetTextColor(COLOR_RED_UP);
-				memDC.TextOut(labelX, upperY - memDC.GetTextExtent(upperLabel).cy / 2, upperLabel);
-				memDC.SetTextColor(COLOR_GREEN_DOWN);
-				memDC.TextOut(labelX, lowerY - memDC.GetTextExtent(lowerLabel).cy / 2, lowerLabel);
-			}
-		}
 	}
 
 	// 走势曲线

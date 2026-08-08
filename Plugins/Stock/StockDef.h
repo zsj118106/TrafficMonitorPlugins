@@ -36,6 +36,7 @@ namespace STOCK
 		TimePoint fullTime;    // 完整日期时间（5分/30分K线模式：yyyy-mm-dd hh:mm）
 		Volume volume;         // 成交量
 		Price price;           // 价格
+		Price openPrice;       // 开盘价（K线模式下用于判断涨跌颜色，分时模式下为0）
 		Price averagePrice;    // 均价（全天累计）
 		Amount amount;         // 成交额（price * volume）
 		Price ma5;             // 5分钟滚动均价
@@ -43,7 +44,7 @@ namespace STOCK
 		Price ma20;            // 20分钟滚动均价
 		Price iopv;            // IOPV 基金份额参考净值
 
-		TimelinePoint() : volume(0), price(0), averagePrice(0), amount(0), ma5(0), ma10(0), ma20(0), iopv(0) {}
+		TimelinePoint() : volume(0), price(0), openPrice(0), averagePrice(0), amount(0), ma5(0), ma10(0), ma20(0), iopv(0) {}
 	};
 
 	// 筹码分布数据点

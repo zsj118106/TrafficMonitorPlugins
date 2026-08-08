@@ -511,69 +511,6 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		drawBandLine(lowerBand, COLOR_GREEN_DOWN);
 	}
 
-	// 振幅上下线
-	if (hover.showAmplitudeBands)
-	{
-		auto stockData = g_data.GetStockData(hover.stockId);
-		auto* dayKLineObj = stockData ? stockData->getKLineData() : nullptr;
-		double avgAmplitude = dayKLineObj ? dayKLineObj->CalculateAverageAmplitude(5) : 0;
-		if (avgAmplitude > 0)
-		{
-			double ampRatio = avgAmplitude / 100.0 / 2.0;
-
-			auto priceToY = [&](double price) -> int {
-				int py = ctx.priceChartTop + ctx.priceChartHeight - static_cast<int>(round((price - minPrice) * unitY));
-				return max(ctx.priceChartTop, min(py, ctx.priceChartTop + ctx.priceChartHeight));
-				};
-
-			{
-				CPen upperPen(PS_SOLID, 1, COLOR_RED_UP);
-				memDC.SelectObject(&upperPen);
-				bool first = true;
-				for (int i = 0; i < totalPoints; i++)
-				{
-					double avgP = timelinePoint[i].averagePrice;
-					if (avgP <= 0) { first = true; continue; }
-					double upperPrice = avgP * (1 + ampRatio);
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * i) + static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) / 2);
-					int py = priceToY(upperPrice);
-					if (first) { memDC.MoveTo(pointX, py); first = false; }
-					else { memDC.LineTo(pointX, py); }
-				}
-			}
-			{
-				CPen lowerPen(PS_SOLID, 1, COLOR_GREEN_DOWN);
-				memDC.SelectObject(&lowerPen);
-				bool first = true;
-				for (int i = 0; i < totalPoints; i++)
-				{
-					double avgP = timelinePoint[i].averagePrice;
-					if (avgP <= 0) { first = true; continue; }
-					double lowerPrice = avgP * (1 - ampRatio);
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * i) + static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) / 2);
-					int py = priceToY(lowerPrice);
-					if (first) { memDC.MoveTo(pointX, py); first = false; }
-					else { memDC.LineTo(pointX, py); }
-				}
-			}
-
-			double lastAvgP = timelinePoint.back().averagePrice;
-			if (lastAvgP > 0)
-			{
-				CString upperLabel, lowerLabel;
-				upperLabel.Format(_T("%.2f"), lastAvgP * (1 + ampRatio));
-				lowerLabel.Format(_T("%.2f"), lastAvgP * (1 - ampRatio));
-				int labelX = ctx.chartLeft + ctx.chartWidth + 2;
-				int upperY = priceToY(lastAvgP * (1 + ampRatio));
-				int lowerY = priceToY(lastAvgP * (1 - ampRatio));
-				memDC.SetTextColor(COLOR_RED_UP);
-				memDC.TextOut(labelX, upperY - memDC.GetTextExtent(upperLabel).cy / 2, upperLabel);
-				memDC.SetTextColor(COLOR_GREEN_DOWN);
-				memDC.TextOut(labelX, lowerY - memDC.GetTextExtent(lowerLabel).cy / 2, lowerLabel);
-			}
-		}
-	}
-
 	// 绘制基金净值曲线
 	if (hover.showJZCurve && ctx.realtimeData.IsETF())
 	{
@@ -662,7 +599,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 				auto sellReasons = std::vector<CString>(totalPoints);
 				auto noLabelSignals = std::vector<bool>(totalPoints, false);
 
-				if (!hover.isKLineMode && ctx.fullTimeline && ctx.fullTimeline->size() >= 120)
+				if (hover.viewMode < UI_VIEW_MIN5_KLINE && ctx.fullTimeline && ctx.fullTimeline->size() >= 120)
 				{
 					std::vector<STOCK::Bar> bars1m = CSignalAnalyzer::ConvertTimelineToBars(*ctx.fullTimeline);
 					auto ar = CSignalAnalyzer::AnalyzeSignalAtFromTimeline(bars1m, bars30, static_cast<int>(bars1m.size()) - 1);
@@ -726,7 +663,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 						}
 					}
 				}
-				else if (hover.isKLineMode)
+				else if (hover.viewMode >= UI_VIEW_MIN5_KLINE)
 				{
 					auto min5KLineObj = stockData->getMin5KLineData();
 					if (min5KLineObj && min5KLineObj->data.size() >= 60)
@@ -1004,7 +941,7 @@ void CTimelineChart::DrawTimelineHoverOverlay(CDC& memDC, const TimelineDrawCont
 	}
 
 	CString timeStr;
-	if (!item.fullTime.empty() && (hover.isMin5KLineMode || hover.isMin30KLineMode))
+	if (!item.fullTime.empty() && (hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE))
 	{
 		timeStr = CString(item.fullTime.c_str());
 		if (timeStr.GetLength() >= 16)
@@ -1071,7 +1008,7 @@ void CTimelineChart::DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawConte
 
 	// 最新一天K线背景高亮
 	{
-		if (!klineData.empty() && (hover.isMin5KLineMode || hover.isMin30KLineMode))
+		if (!klineData.empty() && (hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE))
 		{
 			const auto& lastKp = klineData.back();
 			std::string lastDate;
@@ -1274,68 +1211,6 @@ void CTimelineChart::DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawConte
 		drawBandLine(lowerBand, COLOR_GREEN_DOWN);
 	}
 
-	if (hover.showAmplitudeBands)
-	{
-		auto stockData = g_data.GetStockData(hover.stockId);
-		auto* dayKLineObj = stockData ? stockData->getKLineData() : nullptr;
-		double avgAmplitude = dayKLineObj ? dayKLineObj->CalculateAverageAmplitude(5) : 0;
-		if (avgAmplitude > 0)
-		{
-			double ampRatio = avgAmplitude / 100.0 / 2.0;
-
-			auto priceToY = [&](double price) -> int {
-				int py = ctx.priceChartTop + ctx.priceChartHeight - static_cast<int>(round((price - minPrice) * unitY));
-				return max(ctx.priceChartTop, min(py, ctx.priceChartTop + ctx.priceChartHeight));
-				};
-
-			{
-				CPen upperPen(PS_SOLID, 1, COLOR_RED_UP);
-				memDC.SelectObject(&upperPen);
-				bool first = true;
-				for (int i = 0; i < totalPoints; i++)
-				{
-					double avgP = timelinePoint[i].averagePrice;
-					if (avgP <= 0) { first = true; continue; }
-					double upperPrice = avgP * (1 + ampRatio);
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) * i) + static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) / 2);
-					int py = priceToY(upperPrice);
-					if (first) { memDC.MoveTo(pointX, py); first = false; }
-					else { memDC.LineTo(pointX, py); }
-				}
-			}
-			{
-				CPen lowerPen(PS_SOLID, 1, COLOR_GREEN_DOWN);
-				memDC.SelectObject(&lowerPen);
-				bool first = true;
-				for (int i = 0; i < totalPoints; i++)
-				{
-					double avgP = timelinePoint[i].averagePrice;
-					if (avgP <= 0) { first = true; continue; }
-					double lowerPrice = avgP * (1 - ampRatio);
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) * i) + static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) / 2);
-					int py = priceToY(lowerPrice);
-					if (first) { memDC.MoveTo(pointX, py); first = false; }
-					else { memDC.LineTo(pointX, py); }
-				}
-			}
-
-			double lastAvgP = timelinePoint.back().averagePrice;
-			if (lastAvgP > 0)
-			{
-				CString upperLabel, lowerLabel;
-				upperLabel.Format(_T("%.2f"), lastAvgP * (1 + ampRatio));
-				lowerLabel.Format(_T("%.2f"), lastAvgP * (1 - ampRatio));
-				int labelX = ctx.chartLeft + ctx.chartWidth + 2;
-				int upperY = priceToY(lastAvgP * (1 + ampRatio));
-				int lowerY = priceToY(lastAvgP * (1 - ampRatio));
-				memDC.SetTextColor(COLOR_RED_UP);
-				memDC.TextOut(labelX, upperY - memDC.GetTextExtent(upperLabel).cy / 2, upperLabel);
-				memDC.SetTextColor(COLOR_GREEN_DOWN);
-				memDC.TextOut(labelX, lowerY - memDC.GetTextExtent(lowerLabel).cy / 2, lowerLabel);
-			}
-		}
-	}
-
 	// 最高/最低价标签
 	{
 		STOCK::Price hiPrice = 0, loPrice = (std::numeric_limits<STOCK::Price>::max)();
@@ -1373,7 +1248,7 @@ void CTimelineChart::DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawConte
 	}
 
 	// 智能分析买卖点标记（仅5分钟K线模式）
-	if (hover.isMin5KLineMode && !hover.isMin30KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		auto stockData = g_data.GetStockData(hover.stockId);
 		if (stockData)
@@ -1738,7 +1613,7 @@ void CTimelineChart::DrawTimelineVolumeSection(CDC& memDC, const TimelineDrawCon
 	CIndicatorChart indicatorChart;
 	indicatorChart.DrawVolumeChart(memDC, 0, ctx.volumeChartTop, ctx.chartWidth, ctx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
 
-	if (hover.isMin5KLineMode && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
 	{
 		const auto& fullData = *ctx.fullTimeline;
 		const auto& visibleData = *ctx.timelinePoint;
@@ -1882,7 +1757,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 		memDC.SetTextColor(COLOR_BLACK);
 		memDC.DrawText(hover.timelinePriceTitleTip, priceTitleRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
 	}
-	else if (hover.isKLineMode && !hover.isMin5KLineMode && !hover.isMin30KLineMode && ctx.klineData && !ctx.klineData->empty())
+	else if (hover.viewMode == UI_VIEW_DAY_KLINE && ctx.klineData && !ctx.klineData->empty())
 	{
 		int xPos = g_data.RDPI(4);
 		int centerY = areaTop + titleH / 2;
@@ -1923,7 +1798,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			drawKLineLabel(_T("低:"), kp.low, COLOR_BLACK, (kp.low >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
 		}
 	}
-	else if ((hover.isMin5KLineMode || hover.isMin30KLineMode) && ctx.klineData && !ctx.klineData->empty())
+	else if ((hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE) && ctx.klineData && !ctx.klineData->empty())
 	{
 		// 5分钟/30分钟K线模式：标题栏与分时模式一致，显示现价/IOPV/均价
 		STOCK::Price prevClose = ctx.realtimeData.prevClosePrice;
@@ -2169,7 +2044,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 		}
 	}
 
-	if (hover.isKLineMode && !timelinePoint.empty())
+	if (hover.viewMode >= UI_VIEW_MIN5_KLINE && !timelinePoint.empty())
 	{
 		bool isHovering = (hover.hoveredBarIndex >= 0 && hover.isHoveringVolume);
 		int displayIdx = isHovering ? hover.hoveredBarIndex : static_cast<int>(timelinePoint.size()) - 1;
@@ -2202,7 +2077,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			}
 			};
 
-		if (hover.isMin5KLineMode)
+		if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 		{
 			auto stockData = g_data.GetStockData(hover.stockId);
 			if (stockData)
@@ -2345,16 +2220,16 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 	tmpCtx.priceChartTop = areaTop + titleH;
 	tmpCtx.priceChartHeight = areaHeight - titleH;
 
-	if (hover.isKLineMode && !hover.isMin5KLineMode && !hover.isMin30KLineMode)
+	if (hover.viewMode == UI_VIEW_DAY_KLINE)
 	{
 		if (hover.showTrendView)
 			DrawTimelinePriceCurve(memDC, tmpCtx, hover);
 		else
 			DrawDayKLinePriceChart(memDC, tmpCtx, hover);
 	}
-	else if (hover.isMin5KLineMode)
+	else if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 		DrawMin5KLinePriceChart(memDC, tmpCtx, hover);
-	else if (hover.isMin30KLineMode)
+	else if (hover.viewMode == UI_VIEW_MIN30_KLINE)
 		DrawMin5KLinePriceChart(memDC, tmpCtx, hover);
 	else
 		DrawTimelinePriceCurve(memDC, tmpCtx, hover);

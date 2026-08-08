@@ -230,7 +230,7 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 		drawLabelValueHL(_T("分量:"), perVolStr, COLOR_GRAY_TEXT, COLOR_GRAY_TEXT, isVolHovering);
 	if (!perAmtStr.IsEmpty())
 		drawLabelValueHL(_T("分额:"), perAmtStr, COLOR_GRAY_TEXT, COLOR_GRAY_TEXT, isVolHovering);
-	if (hover.isMin5KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		drawVolumeMA(_T("MA5:"), volMa5, prevVolMa5, RGB(0, 0, 230));
 		drawVolumeMA(_T("MA10:"), volMa10, prevVolMa10, RGB(0, 166, 235));
@@ -244,7 +244,7 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 
 	DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
 
-	if (hover.isMin5KLineMode && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
 	{
 		const auto& fullData = *ctx.fullTimeline;
 		const auto& visibleData = *ctx.timelinePoint;
@@ -389,16 +389,16 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 
 	// 5分钟K线用7,15,5参数，分时(1分钟)用6,12,4参数，30分钟和日K用默认12,26,9
 	int shortP = 12, longP = 26, signalP = 9;
-	if (hover.isMin30KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN30_KLINE)
 	{
 		shortP = 9; longP = 19; signalP = 7;
 	}
-	else if (hover.isMin5KLineMode)
+	else if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		shortP = 7; longP = 15; signalP = 5;
 	}
 
-	else if (!hover.isKLineMode)
+	else if (hover.viewMode < UI_VIEW_MIN5_KLINE)
 	{
 		shortP = 6; longP = 12; signalP = 4;
 	}
@@ -496,8 +496,8 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 				std::vector<MACDData> subMacd(macdData.begin(), macdData.begin() + trendEndIdx + 1);
 				// 1分钟用6根，5分钟用8根，30分钟和日K用10根
 				int lookback = 10;
-				if (hover.isMin5KLineMode) lookback = 8;
-				else if (!hover.isKLineMode && !hover.isMin30KLineMode) lookback = 6;
+				if (hover.viewMode == UI_VIEW_MIN5_KLINE) lookback = 8;
+				else if (hover.viewMode == UI_VIEW_TIMELINE) lookback = 6;
 				auto trend = CStockIndicator::CalcDIFTrend(subMacd, lookback);
 				if (trend.valid && trend.slope != 0.0)
 				{
@@ -582,11 +582,11 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 		const auto& fullData = ctx.fullTimeline ? *ctx.fullTimeline : timelinePoint;
 		// 5分钟K线用8,3,3参数，分时(1分钟)用7,3,3参数，30分钟和日K用默认9,3,3
 		int kdjN = 9, kdjM1 = 3, kdjM2 = 3;
-		if (hover.isMin5KLineMode)
+		if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 		{
 			kdjN = 8; kdjM1 = 3; kdjM2 = 3;
 		}
-		else if (!hover.isMin30KLineMode && !hover.isKLineMode)
+		else if (hover.viewMode == UI_VIEW_TIMELINE)
 		{
 			kdjN = 7; kdjM1 = 3; kdjM2 = 3;
 		}
@@ -655,8 +655,8 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 				std::vector<KDJData> subKdj(kdjData.begin(), kdjData.begin() + trendEndIdx + 1);
 				// 1分钟用6根，5分钟用8根，30分钟和日K用10根
 				int lookback = 10;
-				if (hover.isMin5KLineMode) lookback = 8;
-				else if (!hover.isKLineMode && !hover.isMin30KLineMode) lookback = 6;
+				if (hover.viewMode == UI_VIEW_MIN5_KLINE) lookback = 8;
+				else if (hover.viewMode == UI_VIEW_TIMELINE) lookback = 6;
 				auto trend = CStockIndicator::CalcKDJTrend(subKdj, lookback);
 				if (trend.valid && trend.slope != 0.0)
 				{
@@ -818,7 +818,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 			drawLabelValueHL(_T("分量:"), perVolStr, COLOR_GRAY_TEXT, COLOR_GRAY_TEXT, isVolHovering);
 		if (!perAmtStr.IsEmpty())
 			drawLabelValueHL(_T("分额:"), perAmtStr, COLOR_GRAY_TEXT, COLOR_GRAY_TEXT, isVolHovering);
-		if (hover.isMin5KLineMode)
+		if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 		{
 			drawVolumeMA(_T("MA5:"), volMa5, prevVolMa5, RGB(0, 0, 230));
 			drawVolumeMA(_T("MA10:"), volMa10, prevVolMa10, RGB(0, 166, 235));
@@ -854,7 +854,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 		tmpCtx.volumeChartHeight = areaHeight - titleH;
 		DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
 
-		if (hover.isMin5KLineMode && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
+		if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
 		{
 			const auto& fullData = *ctx.fullTimeline;
 			const auto& visibleData = *ctx.timelinePoint;
@@ -1133,11 +1133,11 @@ void CIndicatorChart::DrawTimelineMACDSection(CDC& memDC, const TimelineDrawCont
 	const auto& timelinePoint = *ctx.timelinePoint;
 	// 5分钟K线用7,15,5参数，分时(1分钟)用6,12,4参数，30分钟和日K用默认12,26,9
 	int shortP = 12, longP = 26, signalP = 9;
-	if (hover.isMin5KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		shortP = 7; longP = 15; signalP = 5;
 	}
-	else if (!hover.isMin30KLineMode && !hover.isKLineMode)
+	else if (hover.viewMode == UI_VIEW_TIMELINE)
 	{
 		shortP = 6; longP = 12; signalP = 4;
 	}
@@ -1154,11 +1154,11 @@ void CIndicatorChart::DrawTimelineKDJSection(CDC& memDC, const TimelineDrawConte
 	const auto& fullData = ctx.fullTimeline ? *ctx.fullTimeline : timelinePoint;
 	// 5分钟K线用8,3,3参数，分时(1分钟)用7,3,3参数，30分钟和日K用默认9,3,3
 	int kdjN = 9, kdjM1 = 3, kdjM2 = 3;
-	if (hover.isMin5KLineMode)
+	if (hover.viewMode == UI_VIEW_MIN5_KLINE)
 	{
 		kdjN = 8; kdjM1 = 3; kdjM2 = 3;
 	}
-	else if (!hover.isMin30KLineMode && !hover.isKLineMode)
+	else if (hover.viewMode == UI_VIEW_TIMELINE)
 	{
 		kdjN = 7; kdjM1 = 3; kdjM2 = 3;
 	}
@@ -1377,11 +1377,11 @@ void CIndicatorChart::DrawTimelineWRSection(CDC& memDC, const TimelineDrawContex
 	const auto& timelinePoint = *ctx.timelinePoint;
 
 	std::vector<WRData> wrData;
-	if ((hover.isMin5KLineMode || hover.isMin30KLineMode) && ctx.klineData)
+	if ((hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE) && ctx.klineData)
 	{
 		wrData = CStockIndicator::CalculateKLineWR(*ctx.klineData);
 	}
-	else if (hover.isKLineMode && !hover.isMin5KLineMode && !hover.isMin30KLineMode)
+	else if (hover.viewMode == UI_VIEW_DAY_KLINE)
 	{
 		if (ctx.klineData)
 			wrData = CStockIndicator::CalculateKLineWR(*ctx.klineData);
@@ -1465,11 +1465,11 @@ void CIndicatorChart::DrawTimelineRSISection(CDC& memDC, const TimelineDrawConte
 	const auto& timelinePoint = *ctx.timelinePoint;
 
 	std::vector<RSIData> rsiData;
-	if ((hover.isMin5KLineMode || hover.isMin30KLineMode) && ctx.klineData)
+	if ((hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE) && ctx.klineData)
 	{
 		rsiData = CStockIndicator::CalculateKLineRSI(*ctx.klineData);
 	}
-	else if (hover.isKLineMode && !hover.isMin5KLineMode && !hover.isMin30KLineMode)
+	else if (hover.viewMode == UI_VIEW_DAY_KLINE)
 	{
 		if (ctx.klineData)
 			rsiData = CStockIndicator::CalculateKLineRSI(*ctx.klineData);
@@ -1532,7 +1532,13 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 		int barY = y + height - barHeight;
 
 		COLORREF color = COLOR_GREEN_DOWN;
-		if (i > 0)
+		// K线模式下openPrice>0，使用收盘价vs开盘价判断涨跌，与K线柱颜色一致
+		if (item.openPrice > 0)
+		{
+			if (item.price >= item.openPrice)
+				color = COLOR_RED_UP;
+		}
+		else if (i > 0)
 		{
 			if (item.price >= timelinePoint[i - 1].price)
 				color = COLOR_RED_UP;
@@ -1553,7 +1559,12 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 		int barY = y + height - barHeight;
 
 		COLORREF color = COLOR_GREEN_DOWN;
-		if (hoveredBarIndex > 0)
+		if (item.openPrice > 0)
+		{
+			if (item.price >= item.openPrice)
+				color = COLOR_RED_UP;
+		}
+		else if (hoveredBarIndex > 0)
 		{
 			if (timelinePoint[hoveredBarIndex].price >= timelinePoint[hoveredBarIndex - 1].price)
 				color = COLOR_RED_UP;

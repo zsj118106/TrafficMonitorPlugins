@@ -1,10 +1,21 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <iostream>
 #include <sstream>
 #include <cstring>
 #include <string.h>
 #include <atltime.h>
+
+// 当前界面视图模式
+enum UIViewMode
+{
+	UI_VIEW_OVERVIEW = 0,   // 总览界面
+	UI_VIEW_AUCTION,		// 集合竞价界面
+	UI_VIEW_TIMELINE,		// 分时图界面	
+	UI_VIEW_MIN5_KLINE,		// 5分钟K线界面
+	UI_VIEW_MIN30_KLINE,	// 30分钟K线界面
+	UI_VIEW_DAY_KLINE,		// 日K线界面
+};
 
 using namespace::std;
 // Log0("这是调试信息！\n")
