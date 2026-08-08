@@ -3067,8 +3067,8 @@ void CFloatingWnd::EnsureChipPeakData()
 			// 通过 StockFetchThread 后台任务队列执行，避免创建临时线程
 			std::wstring stockId = m_stock_id;
 			CStockFetchThread::Instance().PostBackgroundTask([stockId]() {
-				g_data.RequestStockBasicData(stockId);
-				g_data.RequestChipDistributionData(stockId);
+				CStockFetchThread::Instance().FetchStockBasic(stockId);
+				CStockFetchThread::Instance().FetchChipDistribution(stockId);
 				// UI刷新由2秒定时器统一驱动，此处仅更新数据
 				});
 		}

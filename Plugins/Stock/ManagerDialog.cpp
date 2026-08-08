@@ -261,7 +261,7 @@ void CManagerDialog::OnBnClickedOk()
 			CStockFetchThread::Instance().PostBackgroundTask([new_codes]() {
 				for (const auto& code : new_codes)
 				{
-					g_data.RequestKLineData(code, 750);
+					CStockFetchThread::Instance().FetchDayKLine(code, 750);
 				}
 			});
 		}

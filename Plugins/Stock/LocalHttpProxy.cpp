@@ -108,7 +108,7 @@ bool CLocalHttpProxy::Start(const std::wstring& socks5_proxy)
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	addr.sin_port = 0;
-	if (bind(m_listen_socket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR)
+	if (::bind(m_listen_socket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR)
 	{
 		CCommon::WriteLog(L"[LocalHttpProxy] bind failed", g_data.m_log_path.c_str());
 		closesocket(m_listen_socket);

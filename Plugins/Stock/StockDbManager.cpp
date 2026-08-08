@@ -274,14 +274,16 @@ void CStockDbManager::CleanExpiredData()
 {
 	if (m_db == nullptr) return;
 
-	time_t cutoffTime = GetLocalMidnightTime(-7);
-	std::string cutoffDate = GetCacheCutoffDateString();
+	time_t cutoffTime7d = GetLocalMidnightTime(-7);
+	std::string cutoffDate7d = GetLocalDateString(cutoffTime7d);
+	std::string cutoffDate3y = GetLocalDateString(GetLocalMidnightTime(-3 * 365));
+	std::string cutoffDate1m = GetLocalDateString(GetLocalMidnightTime(-30));
 
 	const char* cleanSql = "DELETE FROM inner_outer_snapshots WHERE snapshot_time < ?;";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanSql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(cutoffTime));
+		sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(cutoffTime7d));
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -290,7 +292,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanChipSql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(cutoffTime));
+		sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(cutoffTime7d));
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -299,7 +301,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanTimelineSql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 1, cutoffDate7d.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -308,7 +310,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanKlineSql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 1, cutoffDate3y.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -317,7 +319,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanMin5Sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 1, cutoffDate7d.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -326,7 +328,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanMin30Sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 1, cutoffDate1m.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -335,7 +337,7 @@ void CStockDbManager::CleanExpiredData()
 	stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, cleanFundNavSql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 1, cutoffDate7d.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
@@ -555,13 +557,15 @@ bool CStockDbManager::HasKLineCache(const std::wstring& stockCode, STOCK::Period
 	std::wstring table = GetKLineCacheTableW(period);
 	if (table.empty()) return false;
 
-	// 日K线：只要有缓存即可（历史数据不过期）
+	// 日K线：缓存中最早数据距今超过1个月才算有效
 	if (period == STOCK::Period::DAY)
 	{
-		std::wstring sql = L"SELECT 1 FROM " + table + L" WHERE stock_code = ? LIMIT 1;";
+		std::string cutoffDate1m = GetLocalDateString(GetLocalMidnightTime(-30));
+		std::wstring sql = L"SELECT 1 FROM " + table + L" WHERE stock_code = ? AND day < ? LIMIT 1;";
 		sqlite3_stmt* stmt = nullptr;
 		if (sqlite3_prepare16_v2(m_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) return false;
 		sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 2, cutoffDate1m.c_str(), -1, SQLITE_TRANSIENT);
 		bool hasCache = sqlite3_step(stmt) == SQLITE_ROW;
 		sqlite3_finalize(stmt);
 		return hasCache;

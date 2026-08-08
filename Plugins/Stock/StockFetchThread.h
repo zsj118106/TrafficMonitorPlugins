@@ -5,6 +5,7 @@
 #include <atomic>
 #include <string>
 #include <deque>
+#include "TdxTcpClient.h"  // QuoteItem
 
 // 股票数据获取专用工作线程
 // 将所有网络数据获取与 UI 交互彻底分离：
@@ -44,11 +45,36 @@ public:
 	// 工作线程是否正忙于执行集合竞价任务
 	bool IsCallAuctionBusy() const { return m_callAuction_busy.load(); }
 
-	// 设置当前关注的股票ID（图表数据将针对此股票定时获取）
+	// 设置当前关注股票ID（图表数据将针对此股票定时获取）
 	// 切换股票时自动重置图表计时器，使线程立即获取新股数据
 	void SetFocusStockId(const std::wstring& stockId);
 	// 获取当前关注的股票ID
 	std::wstring GetFocusStockId() const;
+
+	// ===== 数据获取编排方法（fetcher + apply）=====
+	// 由调用方（Run/RunRealtime/外部PostTask lambda）在工作线程中调用
+	// 每个方法完成"获取→解析→存储"的完整流程
+
+	// 实时行情（HTTP）：onlyNonAG=true 仅获取非A股（A股由共享内存提供）
+	void FetchRealtimeByHttp(bool onlyNonAG);
+	// 集合竞价（腾讯，仅A股）
+	void FetchCallAuction();
+	// 分时图（新浪）
+	void FetchTimeline(const std::wstring& code);
+	// 日K线（新浪）
+	void FetchDayKLine(const std::wstring& code, int days = 750);
+	// 5分钟K线（新浪）
+	void FetchMin5KLine(const std::wstring& code, int datalen = 250);
+	// 30分钟K线（新浪）
+	void FetchMin30KLine(const std::wstring& code, int datalen = 250);
+	// ETF基金IOPV
+	void FetchFundIOPV(const std::wstring& code);
+	// 流通股本（东方财富 f85）
+	void FetchStockBasic(const std::wstring& code);
+	// 筹码分布（含DB缓存检查+K线获取+计算入库）
+	void FetchChipDistribution(const std::wstring& code);
+	// 初始化全量数据获取（线程启动时调用一次）
+	void FetchAllData();
 
 private:
 	CStockFetchThread();
@@ -63,6 +89,10 @@ private:
 	static UINT RealtimeThreadProc(LPVOID pParam);
 	void RunRealtime();
 
+	// 共享内存行情数据到达回调（在 CTdxTcpClient 监听线程中被调用）
+	// 更新 DataManager + 限频触发 HTTP 补充（港股等非A股数据）
+	void OnQuotesReceived(const std::vector<QuoteItem>& items);
+
 	// 各图表数据类型的获取间隔（秒）
 	static time_t GetChartInterval(int type);
 	// 各图表数据类型的上次获取时间
@@ -72,6 +102,9 @@ private:
 	time_t m_realtime_last_fetch = 0;	// 上次获取实时行情的时间
 	static const time_t REALTIME_INTERVAL_TRADING = 2;	// 盘中实时行情间隔（秒）
 	static const time_t REALTIME_INTERVAL_LUNCH = 60;	// 午休期间间隔（秒）
+
+	// HTTP 补充（港股等非A股数据）的上次触发时间，用于限频
+	time_t m_last_http_supplement = 0;
 
 	mutable std::mutex m_mutex;
 	std::condition_variable m_cv;

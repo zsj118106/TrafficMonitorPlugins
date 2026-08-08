@@ -4,22 +4,11 @@
 #include "Stock.h"
 #include <vector>
 
-// 通达信TCP行情客户端全局实例
-CTdxTcpClient g_tdx_client;
-
 #include <sstream>
 #include "../utilities/IniHelper.h"
-#include <iomanip>
-#include <afxinet.h>
 #include "sqlite3.h"
-#include "utilities/yyjson/yyjson.h"
-#include "utilities/JsonHelper.h"
 #include <algorithm>
 #include <cmath>
-
-constexpr auto WEB_USERAGENT = _T("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0");
-
-static double GetJsonDoubleValue(yyjson_val* val);
 
 // 仅供 DataManager 业务逻辑使用的日期工具（数据库相关的同名工具已在 StockDbManager.cpp 内）
 static std::string GetLocalDateString(time_t t)
@@ -35,6 +24,11 @@ static std::string GetTodayDateString()
 {
 	return GetLocalDateString(time(nullptr));
 }
+
+// 前置声明：筹码分布相关静态函数（定义在文件后方，供 Apply* 方法调用）
+static bool IsSameLocalDate(time_t lhs, time_t rhs);
+static bool CalculateEtfChipDistribution(const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::Volume totalShares, STOCK::ChipDistribution& chipData);
+static bool CalculateChipDistribution(const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::ChipDistribution& chipData);
 
 CDataManager CDataManager::m_instance;
 
@@ -568,26 +562,319 @@ std::shared_ptr<StockData> CDataManager::GetStockData(const std::wstring& code)
 	return stockMarket.getStock(code);
 }
 
-void CDataManager::RequestAllData()
-{
-	for (const auto& stockCode : m_setting_data.m_stock_codes)
-	{
-		if (CCommon::IsAGStockCode(stockCode))
-		{
-			//获取分时数据
-			RequestTimelineData(stockCode);
-			//获取5分钟K线数据
-			RequestMin5KLineData(stockCode, 250);
-			//获取30分钟K线数据
-			RequestMin30KLineData(stockCode, 250);
+// ===== 数据存储/更新方法实现 =====
+// 由 CStockFetchThread 获取到数据后调用，仅做解析/存储，不发起网络请求
 
-			//获取基金净值
-			if (CCommon::IsFundCode(stockCode))
+// 共享内存A股实时行情：将 QuoteItem 列表写入股票数据，返回有效条目数
+int CDataManager::UpdateRealtimeFromQuotes(const std::vector<QuoteItem>& items)
+{
+	if (items.empty())
+		return 0;
+
+	int validCount = 0;
+	for (const auto& item : items)
+	{
+		// 跳过无效数据
+		if (item.price <= 0.001)
+			continue;
+
+		// code已包含市场前缀（如sh000001、sz000001），直接转为wstring
+		std::wstring code = CCommon::StrToUnicode(item.code);
+
+		auto stockData = stockMarket.getStock(code);
+		if (!stockData)
+			continue;
+
+		StockInfo& info = stockData->info;
+		info.code = code;
+		info.is_ok = true;
+
+		// 首次启动时更新股票名称（displayName为空时才从共享内存写入）
+		if (info.displayName.empty() && item.name[0] != '\0')
+			info.displayName = CCommon::StrToUnicode(item.name);
+
+		bool isEtf = info.IsETF();
+		// 更新价格数据
+		info.prevClosePrice = (Price)(isEtf ? item.pre_close / 10 : item.pre_close);
+		info.openPrice = (Price)(isEtf ? item.open / 10 : item.open);
+		info.highPrice = (Price)(isEtf ? item.high / 10 : item.high);
+		info.lowPrice = (Price)(isEtf ? item.low / 10 : item.low);
+		info.currentPrice = (Price)(isEtf ? item.price / 10 : item.price);
+
+		// 更新五档数据
+		info.bidLevels[0] = OrderLevel((Price)(isEtf ? item.bid1 / 10 : item.bid1), (Volume)item.bid_vol1 * 100);
+		info.bidLevels[1] = OrderLevel((Price)(isEtf ? item.bid2 / 10 : item.bid2), (Volume)item.bid_vol2 * 100);
+		info.bidLevels[2] = OrderLevel((Price)(isEtf ? item.bid3 / 10 : item.bid3), (Volume)item.bid_vol3 * 100);
+		info.bidLevels[3] = OrderLevel((Price)(isEtf ? item.bid4 / 10 : item.bid4), (Volume)item.bid_vol4 * 100);
+		info.bidLevels[4] = OrderLevel((Price)(isEtf ? item.bid5 / 10 : item.bid5), (Volume)item.bid_vol5 * 100);
+		info.askLevels[0] = OrderLevel((Price)(isEtf ? item.ask1 / 10 : item.ask1), (Volume)item.ask_vol1 * 100);
+		info.askLevels[1] = OrderLevel((Price)(isEtf ? item.ask2 / 10 : item.ask2), (Volume)item.ask_vol2 * 100);
+		info.askLevels[2] = OrderLevel((Price)(isEtf ? item.ask3 / 10 : item.ask3), (Volume)item.ask_vol3 * 100);
+		info.askLevels[3] = OrderLevel((Price)(isEtf ? item.ask4 / 10 : item.ask4), (Volume)item.ask_vol4 * 100);
+		info.askLevels[4] = OrderLevel((Price)(isEtf ? item.ask5 / 10 : item.ask5), (Volume)item.ask_vol5 * 100);
+
+		// 更新成交量/额（共享内存中vol已经是手）
+		info.volume = (Volume)item.vol * 100;       // 手->股
+		info.turnover = (Amount)item.amount;
+		info.innerVolume = (Volume)item.inner_vol * 100; // 手->股
+		info.outerVolume = (Volume)item.outer_vol * 100; // 手->股
+
+		// 更新内外盘采样（净比计算）
+		stockData->UpdateVolumeSample();
+
+		// 更新五档挂单变化量（+N/-N）
+		stockData->UpdateOrderPriceAccum();
+
+		// 更新显示字段（价格/涨跌幅/涨跌额）
+		info.UpdateDisplayFields();
+
+		validCount++;
+	}
+
+	return validCount;
+}
+
+void CDataManager::ApplyRealtimeData(const std::vector<std::wstring>& codes, const std::string& resp)
+{
+	stockMarket.LoadRealtimeDataByJson(resp, codes);
+}
+
+void CDataManager::ApplyInnerOuterData(const std::string& resp)
+{
+	stockMarket.LoadInnerOuterData(resp);
+}
+
+void CDataManager::ApplyCallAuctionData(const std::string& resp)
+{
+	stockMarket.LoadCallAuctionData(resp);
+}
+
+void CDataManager::ApplyTimeline(const std::wstring& code, const std::string& resp, bool ok)
+{
+	if (!ok)
+	{
+		stockMarket.LoadTimelineDataByJson(code, NULL);
+		return;
+	}
+
+	CString strData(resp.c_str());
+	stockMarket.LoadTimelineDataByJson(code, &strData);
+	auto stockData = GetStockData(code);
+	auto timelineData = stockData ? stockData->getTimelineData() : nullptr;
+	if (timelineData && !timelineData->data.empty())
+	{
+		SaveTimelineCache(code, timelineData->data);
+		// 分时数据加载后，合并基金净值缓存到iopv字段
+		if (CCommon::IsFundCode(code))
+		{
+			auto navPoints = m_db_mgr.LoadLatestFundNavCache(code);
+			if (!navPoints.empty())
 			{
-				RequestFundIOPV(stockCode);
+				size_t navIdx = 0;
+				for (auto& tp : timelineData->data)
+				{
+					if (navIdx < navPoints.size() && tp.time.find(navPoints[navIdx].time) == 0)
+					{
+						tp.iopv = navPoints[navIdx].iopv;
+						navIdx++;
+					}
+				}
 			}
 		}
 	}
+}
+
+void CDataManager::ApplyDayKLine(const std::wstring& code, const std::string& resp, bool ok)
+{
+	if (!ok)
+	{
+		stockMarket.LoadKLineDataByJson(code, NULL);
+		return;
+	}
+
+	CString strData(resp.c_str());
+	stockMarket.LoadKLineDataByJson(code, &strData);
+	auto stockData = GetStockData(code);
+	auto klineData = stockData ? stockData->getKLineData() : nullptr;
+	if (klineData && !klineData->data.empty())
+		SaveKLineCache(code, STOCK::Period::DAY, klineData->data);
+}
+
+void CDataManager::ApplyMin5KLine(const std::wstring& code, const std::string& resp, bool ok)
+{
+	if (!ok)
+	{
+		stockMarket.LoadMin5KLineDataByJson(code, NULL);
+		return;
+	}
+
+	CString strData(resp.c_str());
+	stockMarket.LoadMin5KLineDataByJson(code, &strData);
+	auto stockData = GetStockData(code);
+	auto klineData = stockData ? stockData->getMin5KLineData() : nullptr;
+	if (klineData && !klineData->data.empty())
+		SaveKLineCache(code, STOCK::Period::MIN5, klineData->data);
+}
+
+void CDataManager::ApplyMin30KLine(const std::wstring& code, const std::string& resp, bool ok)
+{
+	if (!ok)
+	{
+		stockMarket.LoadMin30KLineDataByJson(code, NULL);
+		return;
+	}
+
+	CString strData(resp.c_str());
+	stockMarket.LoadMin30KLineDataByJson(code, &strData);
+	auto stockData = GetStockData(code);
+	auto klineData = stockData ? stockData->getMin30KLineData() : nullptr;
+	if (klineData && !klineData->data.empty())
+		SaveKLineCache(code, STOCK::Period::MIN30, klineData->data);
+}
+
+void CDataManager::ApplyFundIOPV(const std::wstring& code, const std::string& resp, bool ok)
+{
+	if (!ok)
+	{
+		std::string failLog = "[IOPV] FAIL: GetURL failed for " + CCommon::UnicodeToStr(code.c_str());
+		CCommon::WriteLog(failLog.c_str(), m_log_path.c_str());
+		return;
+	}
+
+	CString strData(resp.c_str());
+	stockMarket.LoadFundIOPVData(code, strData);
+
+	// 将当前IOPV值按分钟保存到数据库
+	auto stockData = GetStockData(code);
+	if (stockData && stockData->info.iopv > 0)
+	{
+		// 获取当前时间的分钟字符串（HH:MM）
+		time_t now = time(nullptr);
+		tm localTm = {};
+		localtime_s(&localTm, &now);
+		char timeBuf[16];
+		sprintf_s(timeBuf, "%02d:%02d", localTm.tm_hour, localTm.tm_min);
+
+		STOCK::TimelinePoint navPoint;
+		navPoint.time = timeBuf;
+		navPoint.iopv = stockData->info.iopv;
+		std::vector<STOCK::TimelinePoint> navData = { navPoint };
+		SaveFundNavCache(code, navData);
+
+		// 同时更新分时数据中对应时间点的iopv字段，供净值曲线绘制使用
+		auto* timelineObj = stockData->getTimelineData();
+		if (timelineObj && !timelineObj->data.empty())
+		{
+			std::string curTime(timeBuf);
+			for (auto it = timelineObj->data.rbegin(); it != timelineObj->data.rend(); ++it)
+			{
+				if (it->time == curTime || it->time.find(curTime) == 0)
+				{
+					it->iopv = stockData->info.iopv;
+					break;
+				}
+			}
+		}
+	}
+}
+
+void CDataManager::ApplyStockBasic(const std::wstring& code, STOCK::Volume circulatingAShares, bool ok)
+{
+	// 1. 东方财富成功：写入并入库
+	if (ok && circulatingAShares > 0)
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(code);
+		if (stockData)
+		{
+			stockData->info.circulatingAShares = circulatingAShares;
+			SaveStockBasicData(code, circulatingAShares);
+			return;
+		}
+	}
+
+	// 2. 回退：检查内存已有值（来自腾讯接口解析的流通股本）
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(code);
+		if (stockData && stockData->info.circulatingAShares > 0)
+		{
+			SaveStockBasicData(code, stockData->info.circulatingAShares);
+			return;
+		}
+	}
+
+	// 3. 回退：数据库缓存
+	STOCK::Volume cached = 0;
+	if (m_db_mgr.LoadStockBasicData(code, cached) && cached > 0)
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(code);
+		if (stockData)
+			stockData->info.circulatingAShares = cached;
+	}
+}
+
+bool CDataManager::TryApplyCachedChipDistribution(const std::wstring& code)
+{
+	// 检查数据库是否有当日缓存
+	STOCK::ChipDistribution cachedData;
+	if (LoadLatestChipDistribution(code, cachedData) && IsSameLocalDate(cachedData.updatedAt, time(nullptr)))
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(code);
+		if (stockData)
+		{
+			stockData->chipDistribution = cachedData;
+			return true;
+		}
+	}
+	return false;
+}
+
+void CDataManager::ApplyChipDistribution(const std::wstring& code, const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::Volume totalShares)
+{
+	if (klines.empty())
+		return;
+
+	// 判断是否为基金代码
+	bool isFund = CCommon::IsFundCode(code);
+
+	// 基金类型或普通股票计算失败时，需要流通股本用于ETF筹码计算
+	// 如果调用方未提供 totalShares，从内存获取
+	if (totalShares <= 0)
+	{
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = GetStockData(code);
+		if (stockData)
+			totalShares = stockData->info.circulatingAShares;
+	}
+
+	STOCK::ChipDistribution chipData;
+	bool calcOk = false;
+	if (isFund)
+	{
+		calcOk = CalculateEtfChipDistribution(klines, totalShares, chipData);
+	}
+	else
+	{
+		// 普通股票先用换手率计算
+		calcOk = CalculateChipDistribution(klines, chipData);
+		if (!calcOk)
+		{
+			// 换手率计算失败，回退到ETF算法（基于成交量/流通股本）
+			calcOk = CalculateEtfChipDistribution(klines, totalShares, chipData);
+		}
+	}
+
+	if (!calcOk || !chipData.IsValid())
+		return;
+
+	std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+	auto stockData = GetStockData(code);
+	if (!stockData) return;
+	stockData->chipDistribution = chipData;
+	SaveChipDistribution(code, chipData);
 }
 
 const STOCK::ChipDistribution* CDataManager::GetChipDistribution(const std::wstring& code)
@@ -962,48 +1249,6 @@ double CDataManager::CalculateAverageAmplitude(const std::wstring& code, int day
 	return klineObj->CalculateAverageAmplitude(days);
 }
 
-static double generateRandomDouble()
-{
-	srand(time(nullptr)); // 设置随机种子
-	double random = (double)rand() / RAND_MAX;
-	std::cout << std::fixed << std::setprecision(16);
-	return random;
-}
-
-static double GetJsonDoubleValue(yyjson_val* val)
-{
-	if (val == nullptr) return 0.0;
-	if (yyjson_is_real(val)) return yyjson_get_real(val);
-	if (yyjson_is_sint(val)) return static_cast<double>(yyjson_get_sint(val));
-	if (yyjson_is_uint(val)) return static_cast<double>(yyjson_get_uint(val));
-	if (yyjson_is_str(val))
-	{
-		try
-		{
-			return std::stod(yyjson_get_str(val));
-		}
-		catch (...)
-		{
-			return 0.0;
-		}
-	}
-	return 0.0;
-}
-
-static bool TryParseDouble(const std::string& value, double& result)
-{
-	try
-	{
-		result = std::stod(value);
-		return true;
-	}
-	catch (...)
-	{
-		result = 0.0;
-		return false;
-	}
-}
-
 static bool IsSameLocalDate(time_t lhs, time_t rhs)
 {
 	if (lhs <= 0 || rhs <= 0) return false;
@@ -1013,35 +1258,6 @@ static bool IsSameLocalDate(time_t lhs, time_t rhs)
 	localtime_s(&rhsTm, &rhs);
 	return lhsTm.tm_year == rhsTm.tm_year && lhsTm.tm_mon == rhsTm.tm_mon && lhsTm.tm_mday == rhsTm.tm_mday;
 }
-
-static std::wstring GetEastMoneySecId(const std::wstring& stockId)
-{
-	std::wstring code = stockId;
-	if (code.rfind(kSH, 0) == 0 || code.rfind(kSZ, 0) == 0 || code.rfind(kBJ, 0) == 0)
-		code = code.substr(2);
-
-	if (code.size() != 6)
-		return L"";
-
-	if (code[0] == L'6' || code[0] == L'5')
-		return L"1." + code;
-	if (code[0] == L'0' || code[0] == L'3' || code[0] == L'1')
-		return L"0." + code;
-	if (code[0] == L'8' || code[0] == L'4')
-		return L"0." + code;
-	return L"";
-}
-
-struct ChipKLinePoint
-{
-	std::string date;
-	double open{ 0.0 };
-	double close{ 0.0 };
-	double high{ 0.0 };
-	double low{ 0.0 };
-	double turnoverRate{ 0.0 };
-	STOCK::Volume volume{ 0 };
-};
 
 static double GetCostByChip(const std::vector<double>& chips, double minPrice, double accuracy, double targetChip)
 {
@@ -1247,764 +1463,4 @@ static bool CalculateChipDistribution(const std::vector<ChipKLinePoint>& klines,
 	}
 	chipData.benefitRatio = benefitChips / totalChips;
 	return true;
-}
-
-void CDataManager::RequestRealtimeData(bool onlyNonAG)
-{
-	TRACE(L"RequestRealtimeData... (onlyNonAG=%d)\n", onlyNonAG ? 1 : 0);
-	std::vector<std::wstring> codes = m_setting_data.m_stock_codes;
-
-	// onlyNonAG模式：仅获取非A股代码（港股等），A股由共享内存提供
-	if (onlyNonAG)
-	{
-		codes.erase(std::remove_if(codes.begin(), codes.end(),
-			[](const std::wstring& code) {
-				return code.find(kSH) == 0 || code.find(kSZ) == 0 || code.find(kBJ) == 0;
-			}), codes.end());
-	}
-
-	// 所有股票统一用新浪API获取基本行情（名称、价格、五档等）
-	// 腾讯API对部分代理IP会返回"访问被禁止"，因此不再依赖腾讯API作为A股主数据源
-	if (!codes.empty())
-	{
-		std::wstring url{ L"https://hq.sinajs.cn/?" };
-		std::vector<std::wstring> params;
-		params.push_back(L"_=" + std::to_wstring(generateRandomDouble()));
-		params.push_back(L"list=" + CCommon::vectorJoinString(codes, L","));
-
-		url += CCommon::vectorJoinString(params, L"&");
-		CString strHeaders = _T("Referer: https://finance.sina.com.cn");
-
-		std::string Stock_data;
-		if (CCommon::GetURL(url, Stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-		{
-			stockMarket.LoadRealtimeDataByJson(Stock_data, codes);
-		}
-	}
-
-	// 尝试用腾讯API获取内外盘+IOPV等扩展数据（失败不影响基本行情）
-	// 腾讯API对代理IP可能返回"访问被禁止"，此时内外盘数据无法获取
-	RequestInnerOuterData(!onlyNonAG);
-}
-
-bool CDataManager::RequestRealtimeDataByTcp()
-{
-	// 确保共享内存已打开
-	if (!g_tdx_client.IsConnected())
-	{
-		if (!g_tdx_client.Connect())
-		{
-			CCommon::WriteLog(L"[TDX] 共享内存打开失败（Python端未启动？）", m_log_path.c_str());
-			return false;
-		}
-		CCommon::WriteLog(L"[TDX] 共享内存连接成功", m_log_path.c_str());
-	}
-
-	// 读取共享内存中的行情数据
-	std::vector<QuoteItem> items;
-	unsigned int seq = g_tdx_client.ReadQuotes(items);
-	if (items.empty())
-		return false;  // 无有效数据
-
-	// 将共享内存数据写入stockMarket
-	int validCount = 0;
-	for (const auto& item : items)
-	{
-		// 跳过无效数据
-		if (item.price <= 0.001)
-			continue;
-
-		// code已包含市场前缀（如sh000001、sz000001），直接转为wstring
-		std::wstring code = CCommon::StrToUnicode(item.code);
-
-		auto stockData = stockMarket.getStock(code);
-		if (!stockData)
-			continue;
-
-		StockInfo& info = stockData->info;
-		info.code = code;
-		info.is_ok = true;
-
-		// 首次启动时更新股票名称（displayName为空时才从共享内存写入）
-		if (info.displayName.empty() && item.name[0] != '\0')
-			info.displayName = CCommon::StrToUnicode(item.name);
-
-		bool isEtf = info.IsETF();
-		// 更新价格数据
-		info.prevClosePrice = (Price)(isEtf ? item.pre_close / 10 : item.pre_close);
-		info.openPrice = (Price)(isEtf ? item.open / 10 : item.open);
-		info.highPrice = (Price)(isEtf ? item.high / 10 : item.high);
-		info.lowPrice = (Price)(isEtf ? item.low / 10 : item.low);
-		info.currentPrice = (Price)(isEtf ? item.price / 10 : item.price);
-
-		// 更新五档数据
-		info.bidLevels[0] = OrderLevel((Price)(isEtf ? item.bid1 / 10 : item.bid1), (Volume)item.bid_vol1 * 100);
-		info.bidLevels[1] = OrderLevel((Price)(isEtf ? item.bid2 / 10 : item.bid2), (Volume)item.bid_vol2 * 100);
-		info.bidLevels[2] = OrderLevel((Price)(isEtf ? item.bid3 / 10 : item.bid3), (Volume)item.bid_vol3 * 100);
-		info.bidLevels[3] = OrderLevel((Price)(isEtf ? item.bid4 / 10 : item.bid4), (Volume)item.bid_vol4 * 100);
-		info.bidLevels[4] = OrderLevel((Price)(isEtf ? item.bid5 / 10 : item.bid5), (Volume)item.bid_vol5 * 100);
-		info.askLevels[0] = OrderLevel((Price)(isEtf ? item.ask1 / 10 : item.ask1), (Volume)item.ask_vol1 * 100);
-		info.askLevels[1] = OrderLevel((Price)(isEtf ? item.ask2 / 10 : item.ask2), (Volume)item.ask_vol2 * 100);
-		info.askLevels[2] = OrderLevel((Price)(isEtf ? item.ask3 / 10 : item.ask3), (Volume)item.ask_vol3 * 100);
-		info.askLevels[3] = OrderLevel((Price)(isEtf ? item.ask4 / 10 : item.ask4), (Volume)item.ask_vol4 * 100);
-		info.askLevels[4] = OrderLevel((Price)(isEtf ? item.ask5 / 10 : item.ask5), (Volume)item.ask_vol5 * 100);
-
-		// 更新成交量/额（共享内存中vol已经是手）
-		info.volume = (Volume)item.vol * 100;       // 手→股
-		info.turnover = (Amount)item.amount;
-		info.innerVolume = (Volume)item.inner_vol * 100; // 手→股
-		info.outerVolume = (Volume)item.outer_vol * 100; // 手→股
-
-		// 更新内外盘采样（净比计算）
-		stockData->UpdateVolumeSample();
-
-		// 更新五档挂单变化量（+N/-N）
-		stockData->UpdateOrderPriceAccum();
-
-		// 更新显示字段（价格/涨跌幅/涨跌额）
-		info.UpdateDisplayFields();
-
-		validCount++;
-	}
-
-	return validCount > 0;
-}
-
-void CDataManager::RequestInnerOuterData(bool includeAG)
-{
-	TRACE(L"RequestInnerOuterData... 使用腾讯API获取内外盘 (includeAG=%d)\n", includeAG ? 1 : 0);
-	std::vector<std::wstring> codes;
-	for (const auto& code : m_setting_data.m_stock_codes)
-	{
-		bool isAG = (code.find(kSH) == 0 || code.find(kSZ) == 0 || code.find(kBJ) == 0);
-		// includeAG=true 时获取所有股票的内外盘；否则仅非A股
-		if (includeAG || !isAG)
-			codes.push_back(code);
-	}
-	if (codes.empty()) return;
-
-	// 腾讯API对港股使用 r_hk 前缀（不是 rt_hk），需要转换
-	for (auto& code : codes)
-	{
-		if (code.find(kHK) == 0)
-			code = L"r_" + code.substr(2);  // rt_hk00700 → r_hk00700
-	}
-
-	std::wstring url{ L"http://qt.gtimg.cn/q=" };
-	url += CCommon::vectorJoinString(codes, L",");
-
-	CString strHeaders = _T("Referer: https://finance.qq.com");
-
-	std::string stock_data;
-	if (CCommon::GetURL(url, stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		stockMarket.LoadInnerOuterData(stock_data);
-	}
-}
-
-void CDataManager::RequestFundIOPV(const std::wstring& stock_id)
-{
-	// 仅对ETF基金代码获取IOPV
-	if (!CCommon::IsFundCode(stock_id))
-		return;
-
-	// 提取纯数字代码（sh513770 → 513770）
-	std::wstring pureCode = stock_id;
-	if (pureCode.size() >= 8 && iswalpha(pureCode[0]) && iswalpha(pureCode[1]))
-		pureCode = pureCode.substr(2);
-
-	// 上交所ETF使用上交所实时行情接口（含IOPV）
-	// 返回JSONP: jQuery...({"code":"513060","snap":["恒生医疗",0.5220,...,0.5201,...]})
-	// snap[12] = IOPV值
-	// 深交所ETF使用天天基金实时估值接口
-	std::wstring url;
-	CString strHeaders;
-
-	if (stock_id.find(L"sh") == 0)
-	{
-		// 上交所ETF：yunhq.sse.com.cn接口，含真实IOPV
-		// 添加时间戳参数避免CDN缓存，确保获取实时数据
-		time_t now = time(nullptr);
-		url = L"https://yunhq.sse.com.cn:32042/v1/sh1/snap/" + pureCode
-			+ L"?callback=jQuery&select=name,last,chg_rate,change,open,prev_close,high,low,volume,amount,iopv&_="
-			+ std::to_wstring(now);
-		strHeaders = _T("Referer: https://etf.sse.com.cn");
-	}
-	else
-	{
-		// 深交所ETF：天天基金实时估值接口（JSONP格式）
-		// 返回: jsonpgz({"fundcode":"159920","gsz":"0.3601","dwjz":"0.3441",...})
-		time_t now = time(nullptr);
-		url = L"http://fundgz.1234567.com.cn/js/" + pureCode + L".js?_=" + std::to_wstring(now);
-		strHeaders = _T("Referer: http://fund.eastmoney.com");
-	}
-
-	std::string stock_data;
-	if (CCommon::GetURL(url, stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		CString strData(stock_data.c_str());
-		stockMarket.LoadFundIOPVData(stock_id, strData);
-
-		// 将当前IOPV值按分钟保存到数据库
-		auto stockData = GetStockData(stock_id);
-		if (stockData && stockData->info.iopv > 0)
-		{
-			// 获取当前时间的分钟字符串（HH:MM）
-			time_t now = time(nullptr);
-			tm localTm = {};
-			localtime_s(&localTm, &now);
-			char timeBuf[16];
-			sprintf_s(timeBuf, "%02d:%02d", localTm.tm_hour, localTm.tm_min);
-
-			STOCK::TimelinePoint navPoint;
-			navPoint.time = timeBuf;
-			navPoint.iopv = stockData->info.iopv;
-			std::vector<STOCK::TimelinePoint> navData = { navPoint };
-			SaveFundNavCache(stock_id, navData);
-
-			// 同时更新分时数据中对应时间点的iopv字段，供净值曲线绘制使用
-			auto* timelineObj = stockData->getTimelineData();
-			if (timelineObj && !timelineObj->data.empty())
-			{
-				std::string curTime(timeBuf);
-				for (auto it = timelineObj->data.rbegin(); it != timelineObj->data.rend(); ++it)
-				{
-					if (it->time == curTime || it->time.find(curTime) == 0)
-					{
-						it->iopv = stockData->info.iopv;
-						break;
-					}
-				}
-			}
-		}
-	}
-	else
-	{
-		std::string failLog = "[IOPV] FAIL: GetURL failed for " + CCommon::UnicodeToStr(stock_id.c_str()) + " url=" + CCommon::UnicodeToStr(url.c_str());
-		CCommon::WriteLog(failLog.c_str(), g_data.m_log_path.c_str());
-	}
-}
-
-void CDataManager::RequestCallAuctionData()
-{
-	TRACE(L"RequestCallAuctionData... 使用腾讯API获取集合竞价数据\n");
-	// 仅获取A股代码（sh/sz/bj），过滤掉港股、美股等不支持集合竞价的代码
-	std::vector<std::wstring> codes;
-	for (const auto& code : m_setting_data.m_stock_codes)
-	{
-		if (code.find(L"sh") == 0 || code.find(L"sz") == 0 || code.find(L"bj") == 0)
-			codes.push_back(code);
-	}
-	if (codes.empty()) return;
-
-	std::wstring url{ L"http://qt.gtimg.cn/q=" };
-	url += CCommon::vectorJoinString(codes, L",");
-
-	CString strHeaders = _T("Referer: https://finance.qq.com");
-
-	std::string stock_data;
-	if (CCommon::GetURL(url, stock_data, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		stockMarket.LoadCallAuctionData(stock_data);
-	}
-}
-
-void CDataManager::RequestAllStockBasicData()
-{
-	for (const auto& code : m_setting_data.m_stock_codes)
-	{
-		RequestStockBasicData(code);
-	}
-}
-
-bool CDataManager::RequestStockBasicData(std::wstring stock_id)
-{
-	// 优先用东方财富接口（有网络的用户可用）
-	// 失败缓存检查：WAF 拦截后 10 分钟内不再尝试
-	std::wstring secId = GetEastMoneySecId(stock_id);
-	bool skip_eastmoney = (m_eastmoney_fail_until > 0 && time(nullptr) < m_eastmoney_fail_until);
-	if (!secId.empty() && !skip_eastmoney)
-	{
-		try
-		{
-			TRACE(L"RequestStockBasicData...\n");
-			std::wstring url{ L"https://push2.eastmoney.com/api/qt/stock/get?" };
-			std::vector<std::wstring> params;
-			params.push_back(L"secid=" + secId);
-			params.push_back(L"fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f57,f58,f60,f85,f116,f117");
-			url += CCommon::vectorJoinString(params, L"&");
-
-			CString strHeaders = _T("Referer: https://quote.eastmoney.com");
-			std::string response;
-			bool fetch_ok = CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength());
-			if (!fetch_ok)
-			{
-				// 东方财富请求失败：缓存失败状态 10 分钟，避免反复尝试
-				m_eastmoney_fail_until = time(nullptr) + 600;
-			}
-			else if (!response.empty())
-			{
-				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
-				if (doc != nullptr)
-				{
-					STOCK::Volume circulatingAShares = 0;
-					yyjson_val* root = yyjson_doc_get_root(doc);
-					yyjson_val* data = root ? yyjson_obj_get(root, "data") : nullptr;
-					if (data != nullptr)
-					{
-						circulatingAShares = static_cast<STOCK::Volume>(GetJsonDoubleValue(yyjson_obj_get(data, "f85")));
-					}
-					yyjson_doc_free(doc);
-
-					if (circulatingAShares > 0)
-					{
-						std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-						auto stockData = GetStockData(stock_id);
-						if (stockData)
-						{
-							stockData->info.circulatingAShares = circulatingAShares;
-							SaveStockBasicData(stock_id, circulatingAShares);
-							return true;
-						}
-					}
-				}
-			}
-		}
-		catch (CInternetException* e)
-		{
-			e->Delete();
-			// 异常也视为失败：缓存失败状态
-			m_eastmoney_fail_until = time(nullptr) + 600;
-		}
-		catch (...)
-		{
-			m_eastmoney_fail_until = time(nullptr) + 600;
-		}
-	}
-
-	// 东方财富失败：检查腾讯接口是否已设置流通股本（LoadInnerOuterData 中解析）
-	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		auto stockData = GetStockData(stock_id);
-		if (stockData && stockData->info.circulatingAShares > 0)
-		{
-			SaveStockBasicData(stock_id, stockData->info.circulatingAShares);
-			return true;
-		}
-	}
-
-	// 用数据库缓存
-	STOCK::Volume circulatingAShares = 0;
-	if (m_db_mgr.LoadStockBasicData(stock_id, circulatingAShares) && circulatingAShares > 0)
-	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		auto stockData = GetStockData(stock_id);
-		if (stockData)
-			stockData->info.circulatingAShares = circulatingAShares;
-		return true;
-	}
-
-	return false;
-}
-
-void CDataManager::RequestAllChipDistributionData()
-{
-	for (const auto& code : m_setting_data.m_stock_codes)
-	{
-		RequestChipDistributionData(code);
-	}
-}
-
-bool CDataManager::RequestChipDistributionData(std::wstring stock_id)
-{
-	STOCK::ChipDistribution cachedData;
-	if (LoadLatestChipDistribution(stock_id, cachedData) && IsSameLocalDate(cachedData.updatedAt, time(nullptr)))
-	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		auto stockData = GetStockData(stock_id);
-		if (stockData)
-		{
-			stockData->chipDistribution = cachedData;
-			return true;
-		}
-	}
-
-	std::vector<ChipKLinePoint> klines;
-
-	// 优先用东方财富接口（有网络的用户可用，含换手率字段）
-	// 失败缓存检查：WAF 拦截后 10 分钟内不再尝试
-	std::wstring secId = GetEastMoneySecId(stock_id);
-	bool skip_eastmoney = (m_eastmoney_fail_until > 0 && time(nullptr) < m_eastmoney_fail_until);
-	if (!secId.empty() && !skip_eastmoney)
-	{
-		try
-		{
-			TRACE(L"RequestChipDistributionData (EastMoney)...\n");
-			std::wstring url{ L"https://push2his.eastmoney.com/api/qt/stock/kline/get?" };
-			std::vector<std::wstring> params;
-			params.push_back(L"secid=" + secId);
-			params.push_back(L"fields1=f1,f2,f3,f4,f5,f6");
-			params.push_back(L"fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61");
-			params.push_back(L"klt=101");
-			params.push_back(L"fqt=0");
-			SYSTEMTIME st;
-			GetLocalTime(&st);
-			wchar_t dateBuf[16];
-			swprintf_s(dateBuf, L"%04d%02d%02d", st.wYear, st.wMonth, st.wDay);
-			params.push_back(L"end=" + std::wstring(dateBuf));
-			params.push_back(L"lmt=750");
-			url += CCommon::vectorJoinString(params, L"&");
-
-			CString strHeaders = _T("Referer: https://quote.eastmoney.com");
-			std::string response;
-			bool fetch_ok = CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength());
-			if (!fetch_ok)
-			{
-				// 东方财富请求失败：缓存失败状态 10 分钟
-				m_eastmoney_fail_until = time(nullptr) + 600;
-			}
-			else if (!response.empty())
-			{
-				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
-				if (doc != nullptr)
-				{
-					yyjson_val* root = yyjson_doc_get_root(doc);
-					yyjson_val* data = yyjson_obj_get(root, "data");
-					yyjson_val* klineArr = data ? yyjson_obj_get(data, "klines") : nullptr;
-					if (klineArr != nullptr && yyjson_is_arr(klineArr))
-					{
-						yyjson_val* item;
-						yyjson_arr_iter iter;
-						yyjson_arr_iter_init(klineArr, &iter);
-						while ((item = yyjson_arr_iter_next(&iter)))
-						{
-							const char* line = yyjson_get_str(item);
-							if (line == nullptr) continue;
-							std::vector<std::string> values = CCommon::split(line, ',');
-							if (values.size() < 11) continue;
-
-							double open = 0.0, close = 0.0, high = 0.0, low = 0.0, volumeHands = 0.0, turnoverRate = 0.0;
-							if (!TryParseDouble(values[1], open) || !TryParseDouble(values[2], close) || !TryParseDouble(values[3], high) || !TryParseDouble(values[4], low))
-								continue;
-							TryParseDouble(values[5], volumeHands);
-							TryParseDouble(values[10], turnoverRate);
-							if (high <= 0.0 || low <= 0.0 || volumeHands <= 0.0)
-								continue;
-
-							ChipKLinePoint point;
-							point.date = values[0];
-							point.open = open;
-							point.close = close;
-							point.high = high;
-							point.low = low;
-							point.turnoverRate = turnoverRate;
-							point.volume = static_cast<STOCK::Volume>(volumeHands * 100.0);
-							klines.push_back(point);
-						}
-					}
-					yyjson_doc_free(doc);
-				}
-			}
-		}
-		catch (CInternetException* e)
-		{
-			e->Delete();
-			m_eastmoney_fail_until = time(nullptr) + 600;
-		}
-		catch (...)
-		{
-			m_eastmoney_fail_until = time(nullptr) + 600;
-		}
-	}
-
-	// 东方财富失败（WAF 拦截等）：用新浪日K线接口，换手率自己算
-	if (klines.empty())
-	{
-		try
-		{
-			TRACE(L"RequestChipDistributionData (Sina fallback)...\n");
-			std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-			std::vector<std::wstring> params;
-			params.push_back(L"symbol=" + stock_id);
-			params.push_back(L"scale=240");
-			params.push_back(L"ma=no");
-			params.push_back(L"datalen=750");
-			url += CCommon::vectorJoinString(params, L"&");
-
-			CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-			std::string response;
-			if (CCommon::GetURL(url, response, true, WEB_USERAGENT, strHeaders, strHeaders.GetLength()) && !response.empty())
-			{
-				// 获取流通股本（用于计算换手率：换手率 = 成交量 / 流通股本 * 100%）
-				STOCK::Volume circulatingAShares = 0;
-				{
-					std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-					auto stockData = GetStockData(stock_id);
-					if (stockData)
-						circulatingAShares = stockData->info.circulatingAShares;
-				}
-				if (circulatingAShares <= 0)
-				{
-					RequestStockBasicData(stock_id);
-					std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-					auto stockData = GetStockData(stock_id);
-					if (stockData)
-						circulatingAShares = stockData->info.circulatingAShares;
-				}
-
-				yyjson_doc* doc = yyjson_read(response.c_str(), response.size(), 0);
-				if (doc != nullptr)
-				{
-					yyjson_val* root = yyjson_doc_get_root(doc);
-					if (root != nullptr && yyjson_is_arr(root))
-					{
-						auto getDouble = [](yyjson_val* obj, const char* key) -> double {
-							yyjson_val* val = yyjson_obj_get(obj, key);
-							if (val == nullptr) return 0.0;
-							if (yyjson_is_real(val)) return yyjson_get_real(val);
-							if (yyjson_is_int(val)) return static_cast<double>(yyjson_get_int(val));
-							if (yyjson_is_str(val)) return atof(yyjson_get_str(val));
-							return 0.0;
-							};
-
-						yyjson_val* item;
-						yyjson_arr_iter iter;
-						yyjson_arr_iter_init(root, &iter);
-						while ((item = yyjson_arr_iter_next(&iter)))
-						{
-							if (item == nullptr || !yyjson_is_obj(item))
-								continue;
-
-							ChipKLinePoint point;
-							point.date = utilities::JsonHelper::GetJsonString(item, "day");
-							point.open = getDouble(item, "open");
-							point.high = getDouble(item, "high");
-							point.low = getDouble(item, "low");
-							point.close = getDouble(item, "close");
-							point.volume = static_cast<STOCK::Volume>(getDouble(item, "volume"));
-
-							// 换手率 = 成交量(股) / 流通股本(股) * 100%
-							if (circulatingAShares > 0 && point.volume > 0)
-								point.turnoverRate = static_cast<double>(point.volume) / circulatingAShares * 100.0;
-
-							if (point.high > 0 && point.low > 0 && point.volume > 0)
-								klines.push_back(point);
-						}
-					}
-					yyjson_doc_free(doc);
-				}
-			}
-		}
-		catch (CInternetException* e)
-		{
-			e->Delete();
-		}
-		catch (...)
-		{
-		}
-	}
-
-	if (klines.empty())
-		return false;
-
-	// 计算筹码分布
-	bool isFund = false;
-	STOCK::Volume totalShares = 0;
-	{
-		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-		auto stockData = GetStockData(stock_id);
-		if (stockData)
-		{
-			isFund = CCommon::IsFundCode(stock_id);
-			totalShares = stockData->info.circulatingAShares;
-		}
-	}
-
-	STOCK::ChipDistribution chipData;
-	if (isFund)
-	{
-		if (totalShares <= 0)
-		{
-			RequestStockBasicData(stock_id);
-			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-			auto stockData = GetStockData(stock_id);
-			if (stockData)
-				totalShares = stockData->info.circulatingAShares;
-		}
-		if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
-			return false;
-	}
-	else if (!CalculateChipDistribution(klines, chipData))
-	{
-		if (totalShares <= 0)
-		{
-			RequestStockBasicData(stock_id);
-			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-			auto stockData = GetStockData(stock_id);
-			if (stockData)
-				totalShares = stockData->info.circulatingAShares;
-		}
-		if (!CalculateEtfChipDistribution(klines, totalShares, chipData))
-			return false;
-	}
-
-	std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-	auto stockData = GetStockData(stock_id);
-	if (!stockData) return false;
-	stockData->chipDistribution = chipData;
-	SaveChipDistribution(stock_id, chipData);
-	return true;
-}
-
-void CDataManager::RequestTimelineData(std::wstring stock_id)
-{
-	TRACE(L"RequestTimelineData...\n");
-
-	std::wstring url{ L"https://cn.finance.sina.com.cn/minline/getMinlineData?" };
-	// https://cn.finance.sina.com.cn/minline/getMinlineData?symbol=sz000100&version=7.11.0&dpc=1
-	std::vector<std::wstring> params;
-	params.push_back(L"symbol=" + stock_id);
-	params.push_back(L"version=7.11.0");
-	params.push_back(L"dpc=1");
-
-	SYSTEMTIME st;
-	GetLocalTime(&st);
-	wchar_t dateBuf[20];
-	swprintf_s(dateBuf, L"%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
-	params.push_back(L"date=" + std::wstring(dateBuf));
-
-	url += CCommon::vectorJoinString(params, L"&");
-
-	std::wstring strHeaders{ L"Referer: https://finance.sina.com.cn/realstock/company/" };
-	strHeaders += stock_id;
-	strHeaders += L"/nc.shtml";
-	CString headers = strHeaders.c_str();
-
-	std::string response;
-	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, headers, headers.GetLength()))
-	{
-		CString strData(response.c_str());
-
-		stockMarket.LoadTimelineDataByJson(stock_id, &strData);
-		auto stockData = GetStockData(stock_id);
-		auto timelineData = stockData ? stockData->getTimelineData() : nullptr;
-		if (timelineData && !timelineData->data.empty())
-		{
-			SaveTimelineCache(stock_id, timelineData->data);
-			// 分时数据加载后，合并基金净值缓存到iopv字段
-			if (CCommon::IsFundCode(stock_id))
-			{
-				auto navPoints = m_db_mgr.LoadLatestFundNavCache(stock_id);
-				if (!navPoints.empty())
-				{
-					size_t navIdx = 0;
-					for (auto& tp : timelineData->data)
-					{
-						if (navIdx < navPoints.size() && tp.time.find(navPoints[navIdx].time) == 0)
-						{
-							tp.iopv = navPoints[navIdx].iopv;
-							navIdx++;
-						}
-					}
-				}
-			}
-		}
-	}
-	else
-	{
-		stockMarket.LoadTimelineDataByJson(stock_id, NULL);
-	}
-}
-
-void CDataManager::RequestKLineData(std::wstring stock_id, int days /*= 750*/)
-{
-	TRACE(L"RequestKLineData...\n");
-
-	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-	std::vector<std::wstring> params;
-	params.push_back(L"symbol=" + stock_id);
-	params.push_back(L"scale=240");
-	params.push_back(L"ma=no");
-	params.push_back(L"datalen=" + std::to_wstring(days));
-
-	url += CCommon::vectorJoinString(params, L"&");
-
-	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-	std::string response;
-	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		CString strData(response.c_str());
-		stockMarket.LoadKLineDataByJson(stock_id, &strData);
-		auto stockData = GetStockData(stock_id);
-		auto klineData = stockData ? stockData->getKLineData() : nullptr;
-		if (klineData && !klineData->data.empty())
-			SaveKLineCache(stock_id, STOCK::Period::DAY, klineData->data);
-	}
-	else
-	{
-		stockMarket.LoadKLineDataByJson(stock_id, NULL);
-	}
-}
-
-void CDataManager::RequestMin5KLineData(std::wstring stock_id, int datalen /*= 250*/)
-{
-	TRACE(L"RequestMin5KLineData...\n");
-
-	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-	std::vector<std::wstring> params;
-	params.push_back(L"symbol=" + stock_id);
-	params.push_back(L"scale=5");
-	params.push_back(L"ma=no");
-	params.push_back(L"datalen=" + std::to_wstring(datalen));
-
-	url += CCommon::vectorJoinString(params, L"&");
-
-	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-	std::string response;
-	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		CString strData(response.c_str());
-		stockMarket.LoadMin5KLineDataByJson(stock_id, &strData);
-		auto stockData = GetStockData(stock_id);
-		auto klineData = stockData ? stockData->getMin5KLineData() : nullptr;
-		if (klineData && !klineData->data.empty())
-			SaveKLineCache(stock_id, STOCK::Period::MIN5, klineData->data);
-	}
-	else
-	{
-		stockMarket.LoadMin5KLineDataByJson(stock_id, NULL);
-	}
-}
-
-void CDataManager::RequestMin30KLineData(std::wstring stock_id, int datalen /*= 250*/)
-{
-	TRACE(L"RequestMin30KLineData...\n");
-
-	std::wstring url{ L"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" };
-	std::vector<std::wstring> params;
-	params.push_back(L"symbol=" + stock_id);
-	params.push_back(L"scale=30");
-	params.push_back(L"ma=no");
-	params.push_back(L"datalen=" + std::to_wstring(datalen));
-
-	url += CCommon::vectorJoinString(params, L"&");
-
-	CString strHeaders = _T("Referer: http://finance.sina.com.cn");
-
-	std::string response;
-	if (CCommon::GetURL(url, response, false, WEB_USERAGENT, strHeaders, strHeaders.GetLength()))
-	{
-		CString strData(response.c_str());
-		stockMarket.LoadMin30KLineDataByJson(stock_id, &strData);
-		auto stockData = GetStockData(stock_id);
-		auto klineData = stockData ? stockData->getMin30KLineData() : nullptr;
-		if (klineData && !klineData->data.empty())
-			SaveKLineCache(stock_id, STOCK::Period::MIN30, klineData->data);
-	}
-	else
-	{
-		stockMarket.LoadMin30KLineDataByJson(stock_id, NULL);
-	}
 }

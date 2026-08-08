@@ -666,7 +666,24 @@ void COrderBookPanel::DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, 
 	else
 		textColor = row.textColor;
 	memDC.SetTextColor(textColor);
+
+	// 粗体字体
+	CFont* pOldFont = nullptr;
+	CFont boldFont;
+	if (row.bold)
+	{
+		pOldFont = memDC.GetCurrentFont();
+		LOGFONT lf;
+		pOldFont->GetLogFont(&lf);
+		lf.lfWeight = FW_BOLD;
+		boldFont.CreateFontIndirect(&lf);
+		memDC.SelectObject(&boldFont);
+	}
+
 	memDC.TextOut(x, y, row.text);
+
+	if (row.bold && pOldFont)
+		memDC.SelectObject(pOldFont);
 	if (!row.drawSmallSuffix || row.smallSuffix.IsEmpty())
 	{
 		// 只有右对齐后缀
@@ -810,7 +827,8 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildAskRow(const STOCK::StockInf
 	row.rightAlignSuffix = deltaStr;
 	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 	row.drawSmallSuffix = true;
-	row.textColor = COLOR_RED_UP;
+	row.textColor = (stockInfo.highPrice > 0 && price > 0 && price == stockInfo.highPrice) ? RGB(128, 0, 128) : COLOR_RED_UP;
+	row.bold = (stockInfo.highPrice > 0 && price > 0 && price == stockInfo.highPrice);
 	// 卖一背景色（仅当前价格=卖一时显示）
 	if (idx == 0 && stockInfo.currentPrice > 0 && price > 0 && stockInfo.currentPrice == price)
 	{
@@ -854,7 +872,8 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildBidRow(const STOCK::StockInf
 	row.rightAlignSuffix = deltaStr;
 	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 	row.drawSmallSuffix = true;
-	row.textColor = COLOR_GREEN_DOWN;
+	row.textColor = (stockInfo.lowPrice > 0 && price > 0 && price == stockInfo.lowPrice) ? RGB(0, 100, 0) : COLOR_GREEN_DOWN;
+	row.bold = (stockInfo.lowPrice > 0 && price > 0 && price == stockInfo.lowPrice);
 	// 买一背景色（仅当前价格=买一时显示）
 	if (idx == 0 && stockInfo.currentPrice > 0 && price > 0 && stockInfo.currentPrice == price)
 	{

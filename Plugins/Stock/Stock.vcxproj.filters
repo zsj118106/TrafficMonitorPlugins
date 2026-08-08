@@ -132,10 +132,10 @@
     <ClInclude Include="StockFetchThread.h">
       <Filter>DataManager</Filter>
     </ClInclude>
-    <ClInclude Include="TdxTcpClient.h">
+    <ClInclude Include="StockHttpFetcher.h">
       <Filter>DataManager</Filter>
     </ClInclude>
-    <ClInclude Include="TdxTcpServer.h">
+    <ClInclude Include="TdxTcpClient.h">
       <Filter>DataManager</Filter>
     </ClInclude>
   </ItemGroup>
@@ -227,10 +227,10 @@
     <ClCompile Include="StockFetchThread.cpp">
       <Filter>DataManager</Filter>
     </ClCompile>
-    <ClCompile Include="TdxTcpClient.cpp">
+    <ClCompile Include="StockHttpFetcher.cpp">
       <Filter>DataManager</Filter>
     </ClCompile>
-    <ClCompile Include="TdxTcpServer.cpp">
+    <ClCompile Include="TdxTcpClient.cpp">
       <Filter>DataManager</Filter>
     </ClCompile>
   </ItemGroup>

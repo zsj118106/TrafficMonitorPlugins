@@ -3,10 +3,12 @@
 #include "DataManager.h"
 #include "Common.h"
 #include "Stock.h"
+#include "StockHttpFetcher.h"
 #include "FloatingWnd.h"
 #include <afxwin.h>
 #include <afxinet.h>
 #include <shlwapi.h>
+#include <tlhelp32.h>
 
 // 图表数据类型索引（与 m_chart_last_fetch 数组对应）
 // 按间隔从短到长排列，遍历时从前往后即可保证短间隔任务优先
@@ -41,6 +43,39 @@ void CStockFetchThread::StartExternalProcess()
 	{
 		CCommon::WriteLog(L"[ExternalProcess] 已有进程在运行，跳过", g_data.m_log_path.c_str());
 		return;
+	}
+
+	// 检查系统中是否已有 getPrice.exe 进程在运行（防止残留进程导致重复启动）
+	{
+		HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (hSnap != INVALID_HANDLE_VALUE)
+		{
+			PROCESSENTRY32W pe{};
+			pe.dwSize = sizeof(pe);
+			if (Process32FirstW(hSnap, &pe))
+			{
+				do
+				{
+					if (_wcsicmp(pe.szExeFile, L"getPrice.exe") == 0)
+					{
+						m_dwExternalPid = pe.th32ProcessID;
+						// 打开进程句柄，以便 StopExternalProcess 能正确关闭它
+						m_hExternalProcess = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID);
+						if (m_hExternalProcess != nullptr)
+						{
+							CCommon::WriteLog(L"[ExternalProcess] 发现已有getPrice.exe进程，已接管管理", g_data.m_log_path.c_str());
+						}
+						else
+						{
+							CCommon::WriteLog(L"[ExternalProcess] 发现已有getPrice.exe进程，但无法打开句柄，跳过启动", g_data.m_log_path.c_str());
+						}
+						CloseHandle(hSnap);
+						return;
+					}
+				} while (Process32NextW(hSnap, &pe));
+			}
+			CloseHandle(hSnap);
+		}
 	}
 
 	// 跨进程互斥：TrafficMonitor 可能有多个进程加载插件，确保只启动一次 getPrice.exe
@@ -135,6 +170,11 @@ void CStockFetchThread::StopExternalProcess()
 		CloseHandle(m_hJob);
 		m_hJob = nullptr;
 	}
+	else
+	{
+		// 接管的残留进程没有 Job Object，需要手动终止
+		TerminateProcess(m_hExternalProcess, 0);
+	}
 
 	// 等待主进程退出
 	WaitForSingleObject(m_hExternalProcess, 2000);
@@ -164,6 +204,12 @@ void CStockFetchThread::Start()
 
 	// 启动外部共享内存程序
 	StartExternalProcess();
+
+	// 注册共享内存行情回调并启动监听线程（被动等待事件，零延迟）
+	g_tdx_client.SetQuotesCallback([this](const std::vector<QuoteItem>& items) {
+		OnQuotesReceived(items);
+	});
+	g_tdx_client.StartListening(g_data.m_log_path);
 
 	// 启动图表线程（即时任务/集合竞价/后台任务/图表定时获取）
 	CWinThread* pThread = AfxBeginThread(ThreadProc, this, THREAD_PRIORITY_NORMAL, 0, CREATE_SUSPENDED);
@@ -238,6 +284,9 @@ void CStockFetchThread::Stop()
 	m_realtime_pThread = nullptr;
 	m_realtime_last_fetch = 0;
 
+	// 停止共享内存监听线程（阻塞等待退出）
+	g_tdx_client.StopListening();
+
 	// 关闭外部共享内存程序
 	StopExternalProcess();
 }
@@ -308,7 +357,7 @@ void CStockFetchThread::SetFocusStockId(const std::wstring& stockId)
 		// 日K线数据每天只变化一次，切换股票时获取一次即可，无需定时轮询
 		// 通过 PostTask 投递到工作线程执行，避免在主线程做网络请求
 		PostTask([stockId]() {
-			g_data.RequestKLineData(stockId, 750);
+			CStockFetchThread::Instance().FetchDayKLine(stockId, 750);
 			});
 	}
 }
@@ -342,7 +391,7 @@ void CStockFetchThread::Run()
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
 	// 初始化时获取一次全量数据
-	g_data.RequestAllData();
+	FetchAllData();
 
 	while (true)
 	{
@@ -460,16 +509,16 @@ void CStockFetchThread::Run()
 				switch (chartType)
 				{
 				case CHART_TIMELINE:
-					g_data.RequestTimelineData(stockId);
+					FetchTimeline(stockId);
 					break;
 				case CHART_MIN5_KLINE:
-					g_data.RequestMin5KLineData(stockId, 250);
+					FetchMin5KLine(stockId, 250);
 					break;
 				case CHART_MIN30_KLINE:
-					g_data.RequestMin30KLineData(stockId, 250);
+					FetchMin30KLine(stockId, 250);
 					break;
 				case CHART_IOPV:
-					g_data.RequestFundIOPV(stockId);
+					FetchFundIOPV(stockId);
 					break;
 				}
 			}
@@ -530,96 +579,202 @@ void CStockFetchThread::RunRealtime()
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
 
+	time_t lastReconnectAttempt = 0;
+
 	while (true)
 	{
 		if (m_stopping.load())
 			return;
 
-		// 检查是否需要获取实时行情
 		bool bTradingSession = CCommon::IsMarketSession();
 		bool bFullDay = g_data.m_setting_data.m_full_day == 1;
-		bool needFetch = false;
-		time_t waitSec = 1;  // 默认1秒后重新检查
+		bool bHttpFetch = bTradingSession || bFullDay;
 
-		// 共享内存模式：2秒间隔，不受交易时段限制
-		if (g_tdx_client.IsConnected())
+		// ===== 非交易时段：等待，但可被 Stop 唤醒 =====
+		if (!bHttpFetch)
 		{
-			time_t interval = 2;
-			time_t elapsed = time(nullptr) - m_realtime_last_fetch;
-			if (elapsed >= interval)
-				needFetch = true;
-			else
-				waitSec = interval - elapsed;
-		}
-		else if (bTradingSession || bFullDay)
-		{
-			if (g_data.m_setting_data.m_stock_codes.empty())
-			{
-				// 无股票代码时重置文本，并标记已获取避免重复
-				if (m_realtime_last_fetch != 0)
-				{
-					g_data.ResetText();
-					m_realtime_last_fetch = time(nullptr);
-				}
-			}
-			else
-			{
-				time_t interval = CCommon::IsMarketSession()
-					? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
-				time_t elapsed = time(nullptr) - m_realtime_last_fetch;
-				if (elapsed >= interval)
-					needFetch = true;
-				else
-					waitSec = interval - elapsed;
-			}
-		}
-
-		if (needFetch)
-		{
+			std::unique_lock<std::mutex> lock(m_realtime_mutex);
 			if (m_stopping.load())
 				return;
-
-			// 1. 优先尝试共享内存获取A股数据（零延迟）
-			bool tcpOk = false;
-			try
-			{
-				tcpOk = g_data.RequestRealtimeDataByTcp();
-			}
-			catch (...)
-			{
-				tcpOk = false;
-				CCommon::WriteLog(L"[TDX] 共享内存获取异常，回退到HTTP", g_data.m_log_path.c_str());
-			}
-
-			// 共享内存获取成功后更新时间戳
-			// 这样下一次2秒间隔从共享内存获取时刻算起，不被HTTP阻塞
-			if (tcpOk)
-			{
-				m_realtime_last_fetch = time(nullptr);
-			}
-
-			// 2. HTTP补充港股数据，投递到图表线程异步执行，不阻塞共享内存循环
-			//    如果共享内存获取A股成功，HTTP只更新非A股数据（港股等）
-			//    如果共享内存获取失败，HTTP更新所有数据（含A股）
-			if (bTradingSession || bFullDay || !tcpOk)
-			{
-				PostBackgroundTask([tcpOk]() {
-					g_data.RequestRealtimeData(tcpOk);
-					});
-			}
-
-			if (!tcpOk)
-			{
-				m_realtime_last_fetch = time(nullptr);
-			}
-
-			continue;  // 获取完成后立即检查是否需要下一次
+			m_realtime_cv.wait_for(lock, std::chrono::seconds(5));
+			continue;
 		}
 
-		// 等待：可被 Stop 提前唤醒
+		// ===== 交易/全日时段：通过 HTTP 获取数据 =====
+		time_t now = time(nullptr);
+		time_t interval = bTradingSession ? REALTIME_INTERVAL_TRADING : REALTIME_INTERVAL_LUNCH;
+
+		// 共享内存未连接时，定期尝试重连（Python 端可能后启动）
+		if (!g_tdx_client.IsListening() && now - lastReconnectAttempt >= 5)
+		{
+			lastReconnectAttempt = now;
+			g_tdx_client.StartListening(g_data.m_log_path);
+		}
+
+		if (g_data.m_setting_data.m_stock_codes.empty())
+		{
+			// 无股票代码时重置文本
+			if (m_realtime_last_fetch != 0)
+			{
+				g_data.ResetText();
+				m_realtime_last_fetch = now;
+			}
+			std::unique_lock<std::mutex> lock(m_realtime_mutex);
+			if (m_stopping.load())
+				return;
+			m_realtime_cv.wait_for(lock, std::chrono::seconds(5));
+			continue;
+		}
+
+		// HTTP 补充限频：
+		// - 共享内存已连接：只获取港股（非A股），共享内存负责A股
+		// - 共享内存未连接：获取所有数据（含A股）
+		time_t elapsed = now - m_last_http_supplement;
+		if (elapsed >= interval)
+		{
+			FetchRealtimeByHttp(g_tdx_client.IsListening());
+			m_last_http_supplement = time(nullptr);
+			m_realtime_last_fetch = m_last_http_supplement;
+			continue;
+		}
+
+		// 等待到下次获取，可被 Stop 提前唤醒
 		std::unique_lock<std::mutex> lock(m_realtime_mutex);
 		if (m_stopping.load())
 			return;
-		m_realtime_cv.wait_for(lock, std::chrono::seconds(waitSec));
+		m_realtime_cv.wait_for(lock, std::chrono::seconds(interval - elapsed));
+	}
+}
+
+void CStockFetchThread::OnQuotesReceived(const std::vector<QuoteItem>& items)
+{
+	// 监听线程回调：仅更新 DataManager（线程安全，内部有锁）
+	// HTTP 补充（港股等非A股数据）由 RunRealtime 统一限频调度
+	g_data.UpdateRealtimeFromQuotes(items);
+	m_realtime_last_fetch = time(nullptr);
+}
+
+// ===== 数据获取编排方法实现（fetcher + apply）=====
+// 每个方法完成"获取→解析→存储"的完整流程，由工作线程调用
+
+void CStockFetchThread::FetchRealtimeByHttp(bool onlyNonAG)
+{
+	const auto& codes = g_data.m_setting_data.m_stock_codes;
+	if (codes.empty())
+	{
+		g_data.ResetText();
+		return;
+	}
+
+	// 实时行情（新浪）
+	std::vector<std::wstring> outCodes;
+	std::string resp;
+	if (g_http_fetcher.FetchRealtimeHtml(codes, onlyNonAG, outCodes, resp))
+		g_data.ApplyRealtimeData(outCodes, resp);
+
+	// 内外盘（腾讯）：onlyNonAG=true 时 includeAG=false（仅非A股），反之含A股
+	std::string ioResp;
+	if (g_http_fetcher.FetchInnerOuterHtml(codes, !onlyNonAG, ioResp))
+		g_data.ApplyInnerOuterData(ioResp);
+}
+
+void CStockFetchThread::FetchCallAuction()
+{
+	std::vector<std::wstring> outCodes;
+	std::string resp;
+	if (g_http_fetcher.FetchCallAuctionHtml(g_data.m_setting_data.m_stock_codes, outCodes, resp))
+		g_data.ApplyCallAuctionData(resp);
+}
+
+void CStockFetchThread::FetchTimeline(const std::wstring& code)
+{
+	std::string resp;
+	bool ok = g_http_fetcher.FetchTimeline(code, resp);
+	g_data.ApplyTimeline(code, resp, ok);
+}
+
+void CStockFetchThread::FetchDayKLine(const std::wstring& code, int days)
+{
+	std::string resp;
+	bool ok = g_http_fetcher.FetchDayKLine(code, days, resp);
+	g_data.ApplyDayKLine(code, resp, ok);
+}
+
+void CStockFetchThread::FetchMin5KLine(const std::wstring& code, int datalen)
+{
+	std::string resp;
+	bool ok = g_http_fetcher.FetchMin5KLine(code, datalen, resp);
+	g_data.ApplyMin5KLine(code, resp, ok);
+}
+
+void CStockFetchThread::FetchMin30KLine(const std::wstring& code, int datalen)
+{
+	std::string resp;
+	bool ok = g_http_fetcher.FetchMin30KLine(code, datalen, resp);
+	g_data.ApplyMin30KLine(code, resp, ok);
+}
+
+void CStockFetchThread::FetchFundIOPV(const std::wstring& code)
+{
+	std::string resp;
+	bool ok = g_http_fetcher.FetchFundIOPV(code, resp);
+	g_data.ApplyFundIOPV(code, resp, ok);
+}
+
+void CStockFetchThread::FetchStockBasic(const std::wstring& code)
+{
+	STOCK::Volume shares = 0;
+	bool ok = g_http_fetcher.FetchStockBasicCirculating(code, shares);
+	g_data.ApplyStockBasic(code, shares, ok);
+}
+
+void CStockFetchThread::FetchChipDistribution(const std::wstring& code)
+{
+	// 1. 检查数据库是否有当日缓存
+	if (g_data.TryApplyCachedChipDistribution(code))
+		return;
+
+	// 2. 获取流通股本（筹码计算需要）
+	STOCK::Volume circulatingAShares = g_data.GetCirculatingAShares(code);
+	if (circulatingAShares <= 0)
+	{
+		FetchStockBasic(code);
+		circulatingAShares = g_data.GetCirculatingAShares(code);
+	}
+
+	// 3. 获取筹码K线并计算
+	std::vector<STOCK::ChipKLinePoint> klines;
+	if (g_http_fetcher.FetchChipKLines(code, circulatingAShares, klines))
+		g_data.ApplyChipDistribution(code, klines, circulatingAShares);
+}
+
+void CStockFetchThread::FetchAllData()
+{
+	// 初始化时获取一次实时行情和集合竞价数据
+	FetchRealtimeByHttp(false);
+	FetchCallAuction();
+
+	// 预加载所有股票的日K线、基础数据和筹码分布
+	for (const auto& code : g_data.m_setting_data.m_stock_codes)
+	{
+		if (m_stopping.load())
+			return;
+		if (!g_data.HasKLineCache(code, STOCK::Period::DAY))
+			FetchDayKLine(code, 750);
+		if (!g_data.HasKLineCache(code, STOCK::Period::MIN5))
+			FetchMin5KLine(code, 250);
+		if (!g_data.HasKLineCache(code, STOCK::Period::MIN30))
+			FetchMin30KLine(code, 250);
+		FetchStockBasic(code);
+		FetchChipDistribution(code);
+	}
+
+	// 获取关注股票的图表数据
+	std::wstring focusId = GetFocusStockId();
+	if (!focusId.empty())
+	{
+		FetchTimeline(focusId);
+		if (CCommon::IsFundCode(focusId))
+			FetchFundIOPV(focusId);
 	}
 }

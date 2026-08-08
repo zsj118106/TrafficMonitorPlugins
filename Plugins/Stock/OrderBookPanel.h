@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <StockDef.h>
 #include <string>
@@ -44,6 +44,7 @@ private:
 		bool drawSmallSuffix{ false };
 		bool darkBackground{ false };  // 深色背景时文字改白色
 		bool blink{ false };  // 闪烁效果：当前价=卖一/买一且挂单≤1万
+		bool bold{ false };   // 粗体
 	};
 
 	// 布局上下文（由Draw计算，传递给各子函数）

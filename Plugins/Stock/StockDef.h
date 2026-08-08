@@ -130,6 +130,19 @@ namespace STOCK
 		Volume volume;        // 成交量
 	};
 
+	// 筹码分布计算用K线点（含换手率）
+	// 由数据获取层（HTTP fetcher）填充，交由 DataManager 计算筹码分布
+	struct ChipKLinePoint
+	{
+		std::string date;
+		double open{ 0.0 };
+		double close{ 0.0 };
+		double high{ 0.0 };
+		double low{ 0.0 };
+		double turnoverRate{ 0.0 };  // 换手率(%)
+		Volume volume{ 0 };          // 成交量(股)
+	};
+
 	// ========== 智能分析模块：统一K线基础结构体 ==========
 	// 每一根K线统一存储，用于30min/5min周期指标计算
 	struct Bar

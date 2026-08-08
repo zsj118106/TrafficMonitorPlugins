@@ -135,7 +135,7 @@ void Stock::DataRequired()
 		{
 			m_instance.m_last_call_auction_time = cur_time;
 			CStockFetchThread::Instance().PostCallAuctionTask([]() {
-				g_data.RequestCallAuctionData();
+				CStockFetchThread::Instance().FetchCallAuction();
 				});
 		}
 	}
@@ -203,7 +203,7 @@ void Stock::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
 		// 启动时获取一次集合竞价数据（非竞价时段也获取，用于展示最新竞价结果）
 		m_instance.m_last_call_auction_time = 0;
 		CStockFetchThread::Instance().PostCallAuctionTask([]() {
-			g_data.RequestCallAuctionData();
+			CStockFetchThread::Instance().FetchCallAuction();
 			});
 		break;
 	case ITMPlugin::EI_TASKBAR_WND_VALUE_RIGHT_ALIGN:
@@ -306,7 +306,7 @@ void Stock::SendStockInfoRequest()
 		}
 
 		// 仅执行网络数据获取，不进行任何 UI 交互
-		g_data.RequestRealtimeData();
+		CStockFetchThread::Instance().FetchRealtimeByHttp(false);
 		});
 }
 
@@ -385,11 +385,11 @@ void Stock::PreloadAllKLineData()
 		for (const auto& code : codes)
 		{
 			if (!g_data.HasKLineCache(code, STOCK::Period::DAY))
-				g_data.RequestKLineData(code, 750);
+				CStockFetchThread::Instance().FetchDayKLine(code, 750);
 			if (!g_data.HasKLineCache(code, STOCK::Period::MIN5))
-				g_data.RequestMin5KLineData(code, 250);
+				CStockFetchThread::Instance().FetchMin5KLine(code, 250);
 			if (!g_data.HasKLineCache(code, STOCK::Period::MIN30))
-				g_data.RequestMin30KLineData(code, 250);
+				CStockFetchThread::Instance().FetchMin30KLine(code, 250);
 		}
 		});
 }
@@ -403,7 +403,7 @@ void Stock::PreloadAllChipDistributionData()
 	CStockFetchThread::Instance().PostBackgroundTask([codes]() {
 		for (const auto& code : codes)
 		{
-			g_data.RequestChipDistributionData(code);
+			CStockFetchThread::Instance().FetchChipDistribution(code);
 		}
 		});
 }
@@ -417,7 +417,7 @@ void Stock::PreloadAllStockBasicData()
 	CStockFetchThread::Instance().PostBackgroundTask([codes]() {
 		for (const auto& code : codes)
 		{
-			g_data.RequestStockBasicData(code);
+			CStockFetchThread::Instance().FetchStockBasic(code);
 		}
 		});
 }

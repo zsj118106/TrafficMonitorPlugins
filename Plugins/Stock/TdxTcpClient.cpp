@@ -1,10 +1,15 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "TdxTcpClient.h"
+#include "Common.h"
 #include <cstring>
+
+// 全局共享内存行情客户端实例（从 DataManager.cpp 迁入）
+CTdxTcpClient g_tdx_client;
 
 CTdxTcpClient::CTdxTcpClient()
 	: m_hMap(nullptr)
-	, m_hMutex(nullptr)
+	, m_hEventA(nullptr)
+	, m_hEventB(nullptr)
 	, m_pShare(nullptr)
 	, m_last_seq(0)
 	, m_connected(false)
@@ -13,6 +18,7 @@ CTdxTcpClient::CTdxTcpClient()
 
 CTdxTcpClient::~CTdxTcpClient()
 {
+	StopListening();
 	Disconnect();
 }
 
@@ -23,12 +29,12 @@ bool CTdxTcpClient::Connect(const char* /*ip*/, uint16_t /*port*/)
 	if (m_connected)
 		return true;
 
-	// 打开共享内存
+	// 打开双缓冲共享内存（总长度 2 * sizeof(ShareMemHeader)）
 	m_hMap = OpenFileMappingA(FILE_MAP_READ, FALSE, SHARE_NAME);
 	if (!m_hMap)
 		return false;
 
-	// 映射共享内存
+	// 映射整个双缓冲区
 	m_pShare = (ShareMemHeader*)MapViewOfFile(m_hMap, FILE_MAP_READ, 0, 0, 0);
 	if (!m_pShare)
 	{
@@ -37,10 +43,21 @@ bool CTdxTcpClient::Connect(const char* /*ip*/, uint16_t /*port*/)
 		return false;
 	}
 
-	// 打开命名互斥体
-	m_hMutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, MUTEX_NAME);
-	if (!m_hMutex)
+	// 打开两个自动重置事件
+	m_hEventA = OpenEventA(EVENT_ALL_ACCESS, FALSE, EVENT_NAME_A);
+	if (!m_hEventA)
 	{
+		UnmapViewOfFile(m_pShare);
+		m_pShare = nullptr;
+		CloseHandle(m_hMap);
+		m_hMap = nullptr;
+		return false;
+	}
+	m_hEventB = OpenEventA(EVENT_ALL_ACCESS, FALSE, EVENT_NAME_B);
+	if (!m_hEventB)
+	{
+		CloseHandle(m_hEventA);
+		m_hEventA = nullptr;
 		UnmapViewOfFile(m_pShare);
 		m_pShare = nullptr;
 		CloseHandle(m_hMap);
@@ -55,6 +72,7 @@ bool CTdxTcpClient::Connect(const char* /*ip*/, uint16_t /*port*/)
 
 void CTdxTcpClient::Disconnect()
 {
+	StopListening();  // 先停止监听线程，避免访问已释放的共享内存
 	std::lock_guard<std::mutex> lock(m_mutex);
 
 	if (m_pShare)
@@ -67,10 +85,15 @@ void CTdxTcpClient::Disconnect()
 		CloseHandle(m_hMap);
 		m_hMap = nullptr;
 	}
-	if (m_hMutex)
+	if (m_hEventA)
 	{
-		CloseHandle(m_hMutex);
-		m_hMutex = nullptr;
+		CloseHandle(m_hEventA);
+		m_hEventA = nullptr;
+	}
+	if (m_hEventB)
+	{
+		CloseHandle(m_hEventB);
+		m_hEventB = nullptr;
 	}
 	m_connected = false;
 	m_last_seq = 0;
@@ -82,94 +105,113 @@ bool CTdxTcpClient::IsConnected() const
 	return m_connected;
 }
 
-unsigned int CTdxTcpClient::ReadQuotes(std::vector<QuoteItem>& outItems)
+// 从指定偏移读取一个缓冲区的行情数据（不加锁，调用方负责同步）
+// bufIndex=0 读缓冲A（偏移0），bufIndex=1 读缓冲B（偏移 sizeof(ShareMemHeader)）
+static void ReadBuffer(ShareMemHeader* base, int bufIndex, std::vector<QuoteItem>& outItems, unsigned int& outSeq)
 {
-	std::lock_guard<std::mutex> lock(m_mutex);
+	outSeq = 0;
+	ShareMemHeader* hdr = reinterpret_cast<ShareMemHeader*>(
+		reinterpret_cast<char*>(base) + bufIndex * sizeof(ShareMemHeader));
 
-	if (!m_connected || !m_pShare || !m_hMutex)
-		return 0;
-
-	// 等待互斥体，最多200ms
-	DWORD ret = WaitForSingleObject(m_hMutex, 200);
-	if (ret != WAIT_OBJECT_0)
-		return 0;
-
-	unsigned int cur_seq = m_pShare->seq;
-
-	// 读取所有行情数据（每次都返回，不管seq是否变化）
-	int cnt = m_pShare->item_count;
-	if (cnt > MAX_WATCH_NUM)
-		cnt = MAX_WATCH_NUM;
+	int cnt = hdr->item_count;
+	if (cnt < 0 || cnt > MAX_WATCH_NUM)
+		return;
 
 	outItems.clear();
 	outItems.reserve(cnt);
 	for (int i = 0; i < cnt; i++)
-	{
-		outItems.push_back(m_pShare->items[i]);
-	}
-
-	m_last_seq = cur_seq;
-	ReleaseMutex(m_hMutex);
-	return cur_seq;
+		outItems.push_back(hdr->items[i]);
+	outSeq = hdr->seq;
 }
 
-bool CTdxTcpClient::GetQuoteByCode(const std::string& pureCode, QuoteItem& out)
+void CTdxTcpClient::SetQuotesCallback(OnQuotesCallback callback)
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
+	m_callback = callback;
+}
 
-	if (!m_connected || !m_pShare || !m_hMutex)
-		return false;
+void CTdxTcpClient::StartListening(const std::wstring& logPath)
+{
+	if (m_listening.load())
+		return;
 
-	// 等待互斥体，最多200ms
-	DWORD ret = WaitForSingleObject(m_hMutex, 200);
-	if (ret != WAIT_OBJECT_0)
-		return false;
+	m_log_path = logPath;
 
-	int cnt = m_pShare->item_count;
-	if (cnt > MAX_WATCH_NUM)
-		cnt = MAX_WATCH_NUM;
-
-	bool found = false;
-	for (int i = 0; i < cnt; i++)
+	// 确保共享内存已连接
+	if (!IsConnected())
 	{
-		if (strncmp(m_pShare->items[i].code, pureCode.c_str(), 6) == 0)
+		if (!Connect())
 		{
-			out = m_pShare->items[i];
-			found = true;
-			break;
+			CCommon::WriteLog(L"[TDX] 共享内存打开失败，监听线程未启动（Python端未启动？）", m_log_path.c_str());
+			return;
+		}
+		CCommon::WriteLog(L"[TDX] 共享内存连接成功，启动监听线程", m_log_path.c_str());
+	}
+
+	// 创建退出信号事件（手动重置）
+	m_hStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	if (!m_hStopEvent)
+		return;
+
+	m_listening.store(true);
+	m_listen_thread = std::thread(&CTdxTcpClient::ListenProc, this);
+}
+
+void CTdxTcpClient::StopListening()
+{
+	if (!m_listening.load())
+		return;
+
+	m_listening.store(false);
+	if (m_hStopEvent)
+		SetEvent(m_hStopEvent);
+
+	if (m_listen_thread.joinable())
+		m_listen_thread.join();
+
+	if (m_hStopEvent)
+	{
+		CloseHandle(m_hStopEvent);
+		m_hStopEvent = nullptr;
+	}
+}
+
+void CTdxTcpClient::ListenProc()
+{
+	// 双缓冲被动等待：同时监听 EventA、EventB、StopEvent
+	HANDLE handles[3] = { m_hEventA, m_hEventB, m_hStopEvent };
+	unsigned int old_seq = 0;
+	unsigned int cur_seq = 0;
+	std::vector<QuoteItem> items;
+
+	while (m_listening.load())
+	{
+		DWORD ret = WaitForMultipleObjects(3, handles, FALSE, INFINITE);
+
+		// 退出信号
+		if (!m_listening.load() || ret == WAIT_OBJECT_0 + 2)
+			return;
+
+		// 行情事件触发：按返回值确定读取哪个缓冲区
+		if (ret == WAIT_OBJECT_0 || ret == WAIT_OBJECT_0 + 1)
+		{
+			int bufIndex = (ret == WAIT_OBJECT_0) ? 0 : 1;
+			cur_seq = 0;
+			items.clear();
+
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (!m_connected || !m_pShare)
+					continue;
+
+				old_seq = m_last_seq;
+				ReadBuffer(m_pShare, bufIndex, items, cur_seq);
+				m_last_seq = cur_seq;
+			}
+
+			// seq 变化才回调，避免重复处理相同数据
+			if (cur_seq != 0 && cur_seq != old_seq && !items.empty() && m_callback)
+				m_callback(items);
 		}
 	}
-	ReleaseMutex(m_hMutex);
-	return found;
-}
-
-int CTdxTcpClient::GetMarketByCode(const std::string& pureCode)
-{
-	if (pureCode.length() < 1)
-		return -1;
-	char first = pureCode[0];
-	// 沪市：6/5开头
-	if (first == '6' || first == '5')
-		return 1;
-	// 深市：0/3开头
-	if (first == '0' || first == '3')
-		return 0;
-	// 北交所：8/4开头
-	if (first == '8' || first == '4')
-		return 0;
-	return -1;
-}
-
-int CTdxTcpClient::GetMarketByCode(const std::wstring& pureCode)
-{
-	if (pureCode.length() < 1)
-		return -1;
-	wchar_t first = pureCode[0];
-	if (first == L'6' || first == L'5')
-		return 1;
-	if (first == L'0' || first == L'3')
-		return 0;
-	if (first == L'8' || first == L'4')
-		return 0;
-	return -1;
 }

@@ -4,12 +4,18 @@
 #include <cstdint>
 #include <vector>
 #include <mutex>
+#include <thread>
+#include <atomic>
+#include <functional>
 #include <windows.h>
 
 // 共享内存行情数据结构（与Python端一致）
-const int MAX_WATCH_NUM = 32;
-const char* const SHARE_NAME = "Local\\TdxQuoteShare";
-const char* const MUTEX_NAME = "Local\\TdxQuoteMutex";
+#define MAX_WATCH_NUM 32
+// 双缓冲共享内存（总长度 2 * sizeof(ShareMemHeader)）
+#define SHARE_NAME "Local\\TdxQuoteShareDoubleBuf"
+// 双缓冲事件：A 对应偏移0，B 对应偏移 sizeof(ShareMemHeader)
+#define EVENT_NAME_A "Local\\TdxQuoteEventA"
+#define EVENT_NAME_B "Local\\TdxQuoteEventB"
 
 #pragma pack(push, 1)
 
@@ -49,7 +55,7 @@ typedef struct QuoteItem
 	double amount;       // 成交额
 	long long inner_vol; // 内盘
 	long long outer_vol; // 外盘
-	long long cur_vol;   // 现手	
+	long long cur_vol;   // 现手
 } QuoteItem;
 #pragma pack(pop)
 struct ShareMemHeader
@@ -58,6 +64,9 @@ struct ShareMemHeader
 	int item_count;                      // 行情条目数
 	QuoteItem items[MAX_WATCH_NUM];      // 行情数据
 };
+// 行情数据到达回调（在监听线程中被调用）
+using OnQuotesCallback = std::function<void(const std::vector<QuoteItem>&)>;
+
 // 通达信共享内存行情客户端
 // 通过读取Python端写入的共享内存获取实时行情，零延迟无网络开销
 class CTdxTcpClient
@@ -73,24 +82,35 @@ public:
 	// 是否已连接（共享内存已打开）
 	bool IsConnected() const;
 
-	// 读取共享内存中的行情数据（线程安全）
-	// 返回当前seq，0表示读取失败
-	unsigned int ReadQuotes(std::vector<QuoteItem>& outItems);
-
-	// 根据股票代码查找行情（线程安全）
-	// pureCode: 纯6位数字代码
-	bool GetQuoteByCode(const std::string& pureCode, QuoteItem& out);
-
-	// 根据股票代码判断市场（纯数字代码，不含前缀）
-	// 返回: 1=沪市, 0=深市, -1=无法判断
-	static int GetMarketByCode(const std::string& pureCode);
-	static int GetMarketByCode(const std::wstring& pureCode);
+	// 设置行情数据到达回调（监听线程读到新数据时调用）
+	void SetQuotesCallback(OnQuotesCallback callback);
+	// 启动监听线程（被动等待事件，数据到达立即回调）
+	// 内部会先 Connect 确保共享内存已打开，失败则不启动
+	void StartListening(const std::wstring& logPath);
+	// 停止监听线程（阻塞等待线程退出）
+	void StopListening();
+	// 监听线程是否在运行
+	bool IsListening() const { return m_listening.load(); }
 
 private:
 	mutable std::mutex m_mutex;
 	HANDLE m_hMap;       // 共享内存句柄
-	HANDLE m_hMutex;     // 互斥体句柄
-	ShareMemHeader* m_pShare;  // 共享内存映射指针
+	HANDLE m_hEventA;    // 缓冲区A事件（偏移0）
+	HANDLE m_hEventB;    // 缓冲区B事件（偏移 sizeof(ShareMemHeader)）
+	ShareMemHeader* m_pShare;  // 共享内存映射指针（基址，双缓冲总长 2*sizeof(ShareMemHeader)）
 	unsigned int m_last_seq;   // 上次读取的序列号
 	bool m_connected;
+
+	// 监听线程：被动等待事件，避免2秒轮询
+	std::thread m_listen_thread;
+	std::atomic<bool> m_listening{ false };
+	HANDLE m_hStopEvent{ nullptr };  // 手动重置事件，用于通知监听线程退出
+	OnQuotesCallback m_callback;
+	std::wstring m_log_path;
+
+	// 监听线程主循环
+	void ListenProc();
 };
+
+// 全局实例（供工作线程直接访问共享内存行情）
+extern CTdxTcpClient g_tdx_client;

@@ -65,21 +65,33 @@ public:
 	void ResetText();
 	std::shared_ptr<StockData> GetStockData(const std::wstring& code);
 
-	// 获取最新数据
-	void RequestAllData(); // 程序初始化时获取一次全部数据
-	void RequestRealtimeData(bool onlyNonAG = false);  // onlyNonAG=true时仅获取非A股数据
-	bool RequestRealtimeDataByTcp();  // 共享内存获取A股实时行情，返回是否成功
-	void RequestTimelineData(std::wstring stock_id);
-	void RequestKLineData(std::wstring stock_id, int days = 250);
-	void RequestMin5KLineData(std::wstring stock_id, int datalen = 250);
-	void RequestMin30KLineData(std::wstring stock_id, int datalen = 250);
-	void RequestInnerOuterData(bool includeAG = false);
-	void RequestFundIOPV(const std::wstring& stock_id);
-	void RequestCallAuctionData();
-	bool RequestChipDistributionData(std::wstring stock_id);
-	void RequestAllChipDistributionData();
-	bool RequestStockBasicData(std::wstring stock_id);
-	void RequestAllStockBasicData();
+	// ===== 数据存储/更新方法 =====
+	// 由 CStockFetchThread 获取到数据后调用，DataManager 仅负责解析/存储，不发起任何网络请求
+	// 共享内存A股实时行情：将 QuoteItem 列表写入股票数据，返回有效条目数（>0 表示成功）
+	int UpdateRealtimeFromQuotes(const std::vector<QuoteItem>& items);
+	// 实时行情（新浪）：解析响应并写入
+	void ApplyRealtimeData(const std::vector<std::wstring>& codes, const std::string& resp);
+	// 内外盘（腾讯）
+	void ApplyInnerOuterData(const std::string& resp);
+	// 集合竞价（腾讯）
+	void ApplyCallAuctionData(const std::string& resp);
+	// 分时图：ok=true 解析并缓存，ok=false 清空旧数据（请求失败时）
+	void ApplyTimeline(const std::wstring& code, const std::string& resp, bool ok);
+	// 日K线
+	void ApplyDayKLine(const std::wstring& code, const std::string& resp, bool ok);
+	// 5分钟K线
+	void ApplyMin5KLine(const std::wstring& code, const std::string& resp, bool ok);
+	// 30分钟K线
+	void ApplyMin30KLine(const std::wstring& code, const std::string& resp, bool ok);
+	// ETF基金IOPV：ok=true 解析并保存净值缓存+更新分时iopv，ok=false 仅记录失败日志
+	void ApplyFundIOPV(const std::wstring& code, const std::string& resp, bool ok);
+	// 流通股本：ok=true且shares>0 写入并入库；否则回退到内存已有值/数据库缓存
+	void ApplyStockBasic(const std::wstring& code, STOCK::Volume circulatingAShares, bool ok);
+	// 筹码分布：若数据库有当日缓存则应用并返回 true（避免重复抓取）
+	bool TryApplyCachedChipDistribution(const std::wstring& code);
+	// 筹码分布：根据K线计算筹码分布并入库
+	void ApplyChipDistribution(const std::wstring& code, const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::Volume totalShares);
+
 	bool HasTimelineCache(const std::wstring& stockCode);
 	bool HasKLineCache(const std::wstring& stockCode, STOCK::Period period);
 	STOCK::Volume GetCirculatingAShares(const std::wstring& code);
@@ -187,11 +199,4 @@ private:
 	// 每日重置跟踪：记录上次更新日期，跨天时标记待重置
 	std::string m_avg_diff_last_date;
 	bool m_avg_diff_reset_pending{ false };  // 跨天待重置标识，等交易时段获取到今日数据后才执行
-
-	// 东方财富接口失败缓存：WAF 拦截 WinINet 后，一段时间内不再尝试
-	// 值为失败截止时间戳（秒），0 表示未缓存
-	time_t m_eastmoney_fail_until{ 0 };
 };
-
-// 通达信共享内存行情客户端（全局实例，供工作线程直接访问）
-extern CTdxTcpClient g_tdx_client;
