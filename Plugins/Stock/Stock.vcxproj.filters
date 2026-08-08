@@ -84,9 +84,6 @@
     <ClInclude Include="StockIndicator.h">
       <Filter>SignalAnalyzer</Filter>
     </ClInclude>
-    <ClInclude Include="StockFetchThread.h">
-      <Filter>Stock</Filter>
-    </ClInclude>
     <ClInclude Include="StockDef.h">
       <Filter>DataManager</Filter>
     </ClInclude>
@@ -132,6 +129,15 @@
     <ClInclude Include="TimelineChart.h">
       <Filter>FloatingWnd</Filter>
     </ClInclude>
+    <ClInclude Include="StockFetchThread.h">
+      <Filter>DataManager</Filter>
+    </ClInclude>
+    <ClInclude Include="TdxTcpClient.h">
+      <Filter>DataManager</Filter>
+    </ClInclude>
+    <ClInclude Include="TdxTcpServer.h">
+      <Filter>DataManager</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -172,9 +178,6 @@
     </ClCompile>
     <ClCompile Include="StockIndicator.cpp">
       <Filter>SignalAnalyzer</Filter>
-    </ClCompile>
-    <ClCompile Include="StockFetchThread.cpp">
-      <Filter>Stock</Filter>
     </ClCompile>
     <ClCompile Include="StockDef.cpp">
       <Filter>DataManager</Filter>
@@ -220,6 +223,15 @@
     </ClCompile>
     <ClCompile Include="TimelineChart.cpp">
       <Filter>FloatingWnd</Filter>
+    </ClCompile>
+    <ClCompile Include="StockFetchThread.cpp">
+      <Filter>DataManager</Filter>
+    </ClCompile>
+    <ClCompile Include="TdxTcpClient.cpp">
+      <Filter>DataManager</Filter>
+    </ClCompile>
+    <ClCompile Include="TdxTcpServer.cpp">
+      <Filter>DataManager</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
