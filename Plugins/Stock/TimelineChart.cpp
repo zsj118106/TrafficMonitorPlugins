@@ -1794,8 +1794,6 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 
 			drawKLineLabel(_T("开:"), kp.open, COLOR_BLACK, (kp.open >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
 			drawKLineLabel(_T("收:"), kp.close, COLOR_BLACK, (kp.close >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
-			drawKLineLabel(_T("高:"), kp.high, COLOR_BLACK, (kp.high >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
-			drawKLineLabel(_T("低:"), kp.low, COLOR_BLACK, (kp.low >= prevClose ? COLOR_RED_UP : COLOR_GREEN_DOWN));
 		}
 	}
 	else if ((hover.viewMode == UI_VIEW_MIN5_KLINE || hover.viewMode == UI_VIEW_MIN30_KLINE) && ctx.klineData && !ctx.klineData->empty())
@@ -2180,36 +2178,6 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 				if (dispMa10 > 0) items.push_back({ _T("MA10:") + formatPrice(dispMa10), RGB(0, 166, 235) });
 				if (dispMa20 > 0) items.push_back({ _T("MA20:") + formatPrice(dispMa20), RGB(169, 102, 186) });
 				drawRightLabelValues(items);
-			}
-			else if (hover.showBollBands)
-			{
-				const int N = 20;
-				const int K = 2;
-				const auto& fullData = ctx.fullTimeline ? *ctx.fullTimeline : timelinePoint;
-				int globalIdx = ctx.startIndex + displayIdx;
-				if (globalIdx >= N - 1 && globalIdx < static_cast<int>(fullData.size()))
-				{
-					double sum = 0;
-					for (int i = globalIdx - N + 1; i <= globalIdx; i++)
-						sum += fullData[i].price;
-					double mid = sum / N;
-
-					double variance = 0;
-					for (int i = globalIdx - N + 1; i <= globalIdx; i++)
-					{
-						double diff = fullData[i].price - mid;
-						variance += diff * diff;
-					}
-					double stddev = std::sqrt(variance / N);
-					double upper = mid + K * stddev;
-					double lower = mid - K * stddev;
-
-					std::vector<std::pair<CString, COLORREF>> items;
-					items.push_back({ _T("上:") + formatPrice(static_cast<STOCK::Price>(upper)), COLOR_RED_UP });
-					items.push_back({ _T("中:") + formatPrice(static_cast<STOCK::Price>(mid)), RGB(0, 0, 230) });
-					items.push_back({ _T("下:") + formatPrice(static_cast<STOCK::Price>(lower)), COLOR_GREEN_DOWN });
-					drawRightLabelValues(items);
-				}
 			}
 		}
 	}

@@ -193,7 +193,8 @@ private:
 	bool m_showJZCurve{ false };  // 基金净值曲线
 	bool m_showMA{ false };
 	bool m_showBollBands{ true };
-	volatile bool m_chartDirty{ false };  // 图表数据更新标识，由PostMessage设置，定时器检查
+	volatile bool m_chartDirty{ false };      // 图表数据更新标识（走势图/K线/MACD等），由PostMessage设置
+	volatile bool m_orderBookDirty{ false };  // 盘口数据更新标识（五档/成交/净比等），由共享内存回调设置
 	int m_klineHoveredBarIndex{ -1 };
 	CString m_klineHoverTip;
 	CString m_klineVolumeHoverTip;

@@ -456,8 +456,8 @@ void STOCK::StockMarket::LoadCallAuctionData(std::string data)
 
 		// 昨收价 [4]
 		ca.prevClosePrice = convert<Price>(data_arr[4]);
-		// 虚拟撮合价/最近价 [30]
-		ca.matchPrice = convert<Price>(data_arr[30]);
+		// 虚拟撮合价/现价 [3]（集合竞价期间现价即为撮合价）
+		ca.matchPrice = convert<Price>(data_arr[3]);
 		// 成交量 [36]（单位：手→转换为股）
 		ca.matchVolume = convert<Volume>(data_arr[36]) * 100;
 		// 涨停价 [44]

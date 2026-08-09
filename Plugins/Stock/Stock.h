@@ -64,6 +64,7 @@ public:
 
 	// 通知浮动窗口刷新显示（线程安全，可从工作线程调用）
 	void NotifyFloatingWndUpdate();
+	void NotifyFloatingWndOrderBookUpdate();  // 通知盘口数据更新
 
 public:
 	std::mutex m_stockDataMutex;

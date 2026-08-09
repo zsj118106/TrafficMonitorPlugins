@@ -446,7 +446,7 @@ void CStockFetchThread::Run()
 				m_callAuction_busy = false;
 			else if (!isBackgroundTask)
 				m_busy = false;
-			// UI刷新由浮动窗口2秒定时器统一驱动，此处仅更新数据
+			// UI刷新由1秒定时器检查dirty标识驱动，此处仅更新数据
 			continue;
 		}
 
@@ -535,7 +535,7 @@ void CStockFetchThread::Run()
 				std::lock_guard<std::mutex> lock(m_mutex);
 				m_chart_last_fetch[chartType] = time(nullptr);
 			}
-			// UI刷新由浮动窗口2秒定时器统一驱动，此处仅更新数据
+			// UI刷新由1秒定时器检查dirty标识驱动，此处仅更新数据
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
@@ -652,6 +652,8 @@ void CStockFetchThread::OnQuotesReceived(const std::vector<QuoteItem>& items)
 	// HTTP 补充（港股等非A股数据）由 RunRealtime 统一限频调度
 	g_data.UpdateRealtimeFromQuotes(items);
 	m_realtime_last_fetch = time(nullptr);
+	// 通知浮动窗口盘口数据更新
+	Stock::Instance().NotifyFloatingWndOrderBookUpdate();
 }
 
 // ===== 数据获取编排方法实现（fetcher + apply）=====
@@ -676,6 +678,9 @@ void CStockFetchThread::FetchRealtimeByHttp(bool onlyNonAG)
 	std::string ioResp;
 	if (g_http_fetcher.FetchInnerOuterHtml(codes, !onlyNonAG, ioResp))
 		g_data.ApplyInnerOuterData(ioResp);
+
+	// 通知浮动窗口盘口数据更新
+	Stock::Instance().NotifyFloatingWndOrderBookUpdate();
 }
 
 void CStockFetchThread::FetchCallAuction()

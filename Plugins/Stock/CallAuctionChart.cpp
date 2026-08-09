@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "CallAuctionChart.h"
 #include "ChartColors.h"
 #include "Common.h"
@@ -149,11 +149,14 @@ void CCallAuctionChart::Draw(CDC& memDC, const TimelineDrawContext& ctx, const S
 	}
 
 	// 主图Y轴价格刻度
-	if (ctx.unitY > 0)
+	if (ctx.maxPrice > 0 && ctx.minPrice >= 0 && ctx.maxPrice > ctx.minPrice && ctx.niceStep > 0)
 	{
 		memDC.SetTextColor(COLOR_GRAY_TEXT);
-		for (double p = ctx.minPrice; p <= ctx.maxPrice + ctx.niceStep * 0.01; p += ctx.niceStep)
+		double priceRange = ctx.maxPrice - ctx.minPrice;
+		int labelCount = static_cast<int>(round(priceRange / ctx.niceStep));
+		for (int i = 0; i <= labelCount; i++)
 		{
+			double p = round((ctx.minPrice + i * ctx.niceStep) * 1000.0) / 1000.0;
 			int y = ctx.priceChartTop + ctx.priceChartHeight - static_cast<int>((p - ctx.minPrice) * ctx.unitY);
 			CString label = CCommon::FormatFloat(p);
 			CSize sz = memDC.GetTextExtent(label);

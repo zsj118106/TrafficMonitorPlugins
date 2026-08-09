@@ -40,7 +40,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 	const int xSlots = (xAxisPoints > 0) ? xAxisPoints : totalPts;
 	const int fixedGap = 1;
 	int slotWidth = xSlots > 0 ? width / xSlots : 1;
-	int barWidth = max(2, slotWidth - fixedGap);
+	int barWidth = max(2, static_cast<int>((slotWidth - fixedGap) * 0.8));
 	int halfSlot = slotWidth / 2;
 
 	// 绘制 MACD 柱状图
@@ -1039,7 +1039,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 	if (totalVisible <= 0) { memDC.SelectObject(pOldPen); return; }
 
 	int slotWidth = width / totalVisible;
-	int barWidth = max(2, slotWidth - 1);
+	int barWidth = max(2, static_cast<int>((slotWidth - 1) * 0.8));
 	int halfSlot = slotWidth / 2;
 
 	int drawStart = max(startIndex, finalStartIndex);
