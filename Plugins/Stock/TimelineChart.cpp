@@ -333,7 +333,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 
 	// 均价线（点虚线，先画）
 	{
-		CPen avgLinePen(PS_DASHDOT, 1, COLOR_GOLDEN);
+		CPen avgLinePen(PS_SOLID, 1, COLOR_GOLDEN);
 		CPen* pOldAvgPen = memDC.SelectObject(&avgLinePen);
 		bool firstAvgPoint = true;
 		for (int i = 0; i < totalPoints; i++)
