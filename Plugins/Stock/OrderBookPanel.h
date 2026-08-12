@@ -1,9 +1,9 @@
 #pragma once
 
 #include <StockDef.h>
+#include "Common.h"
 #include <string>
 #include <vector>
-#include "Common.h"
 
 // 盘口面板绘制
 // 职责：在指定矩形区域内绘制五档买卖盘、委比、趋势判定、净比(1/5/10/20/99)、
@@ -30,6 +30,8 @@ private:
 		CString smallSuffix;
 		CString rightAlignSuffix;  // 右对齐的瞬时变化量（+N/-N）
 		COLORREF rightAlignSuffixColor{ RGB(0,0,0) };  // 右对齐后缀颜色
+		CString cumVolSuffix;      // 累计成交量后缀（显示在瞬时变化量前面）
+		COLORREF cumVolSuffixColor{ RGB(0,0,0) };  // 累计成交量后缀颜色
 		COLORREF textColor;
 		bool fillBackground{ false };
 		COLORREF backgroundColor;
@@ -109,6 +111,9 @@ private:
 
 	// 辅助：获取买一/卖一挂单瞬时变化量
 	STOCK::Volume GetOrderDeltaLots(STOCK::Price price);
+
+	// 辅助：获取盘口累计成交量（手）
+	STOCK::Volume GetOrderBookCumVol(STOCK::Price price) const;
 
 	// 辅助：计算净比趋势箭头
 	static CString CalcNetRatioTrend(double ratio, double previousRatio);

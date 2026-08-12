@@ -692,7 +692,7 @@ void COrderBookPanel::DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, 
 			CFont* oldFont = memDC.GetCurrentFont();
 			LOGFONT lf;
 			oldFont->GetLogFont(&lf);
-			lf.lfHeight = lf.lfHeight * 7 / 8;
+			lf.lfHeight = lf.lfHeight * 3 / 4;
 			CFont smallFont;
 			smallFont.CreateFontIndirect(&lf);
 			memDC.SelectObject(&smallFont);
@@ -708,18 +708,27 @@ void COrderBookPanel::DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, 
 	CFont* oldFont = memDC.GetCurrentFont();
 	LOGFONT lf;
 	oldFont->GetLogFont(&lf);
-	lf.lfHeight = lf.lfHeight * 7 / 8;
+	lf.lfHeight = lf.lfHeight * 3 / 4;
 	CFont smallFont;
 	smallFont.CreateFontIndirect(&lf);
 	memDC.SelectObject(&smallFont);
 	memDC.SetTextColor(row.darkBackground ? RGB(255, 255, 200) : textColor);
 	memDC.TextOut(suffixX, y + g_data.RDPI(1), row.smallSuffix);
-	// 右对齐绘制瞬时变化量
+	// 右对齐绘制累计成交量和瞬时变化量
+	// 布局：[...smallSuffix] [rightAlignSuffix] [cumVolSuffix] 右边距
+	int rightEdge = x + rowWidth - g_data.RDPI(4);
+	if (!row.cumVolSuffix.IsEmpty())
+	{
+		memDC.SetTextColor(row.cumVolSuffixColor);
+		int cumVolW = memDC.GetTextExtent(row.cumVolSuffix).cx;
+		memDC.TextOut(rightEdge - cumVolW, y + g_data.RDPI(1), row.cumVolSuffix);
+		rightEdge -= cumVolW;
+	}
 	if (!row.rightAlignSuffix.IsEmpty())
 	{
 		memDC.SetTextColor(row.rightAlignSuffixColor);
 		int raSuffixW = memDC.GetTextExtent(row.rightAlignSuffix).cx;
-		memDC.TextOut(x + rowWidth - raSuffixW - g_data.RDPI(4), y + g_data.RDPI(1), row.rightAlignSuffix);
+		memDC.TextOut(rightEdge - raSuffixW, y + g_data.RDPI(1), row.rightAlignSuffix);
 	}
 	memDC.SelectObject(oldFont);
 }
@@ -790,6 +799,16 @@ STOCK::Volume COrderBookPanel::GetOrderDeltaLots(STOCK::Price price)
 	return it->second.deltaVolume / 100;
 }
 
+STOCK::Volume COrderBookPanel::GetOrderBookCumVol(STOCK::Price price) const
+{
+	if (!m_stockDataForAccum || price <= 0)
+		return 0;
+	auto it = m_stockDataForAccum->orderBookCumVolMap.find(price);
+	if (it == m_stockDataForAccum->orderBookCumVolMap.end())
+		return 0;
+	return it->second.cumVolume;
+}
+
 CString COrderBookPanel::CalcNetRatioTrend(double ratio, double previousRatio)
 {
 	double absRatio = std::abs(ratio);
@@ -820,12 +839,20 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildAskRow(const STOCK::StockInf
 		deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 	}
 
+	// 累计成交量
+	STOCK::Volume cumVol = GetOrderBookCumVol(price);
+	CString cumVolStr;
+	if (cumVol > 0)
+		cumVolStr.Format(_T(" %lld"), static_cast<long long>(cumVol));
+
 	OrderBookRow row;
 	row.price = price;
 	row.text = askTxt;
 	row.smallSuffix = askSuffix;
 	row.rightAlignSuffix = deltaStr;
 	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
+	row.cumVolSuffix = cumVolStr;
+	row.cumVolSuffixColor = RGB(128, 0, 128);
 	row.drawSmallSuffix = true;
 	row.textColor = (stockInfo.highPrice > 0 && price > 0 && price == stockInfo.highPrice) ? RGB(128, 0, 128) : COLOR_RED_UP;
 	row.bold = (stockInfo.highPrice > 0 && price > 0 && price == stockInfo.highPrice);
@@ -865,12 +892,20 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildBidRow(const STOCK::StockInf
 		deltaStr.Format(_T("%s%s"), delta > 0 ? _T("+") : _T("-"), deltaVal.GetString());
 	}
 
+	// 累计成交量
+	STOCK::Volume cumVol = GetOrderBookCumVol(price);
+	CString cumVolStr;
+	if (cumVol > 0)
+		cumVolStr.Format(_T(" %lld"), static_cast<long long>(cumVol));
+
 	OrderBookRow row;
 	row.price = price;
 	row.text = bidTxt;
 	row.smallSuffix = bidSuffix;
 	row.rightAlignSuffix = deltaStr;
 	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
+	row.cumVolSuffix = cumVolStr;
+	row.cumVolSuffixColor = RGB(0, 100, 0);
 	row.drawSmallSuffix = true;
 	row.textColor = (stockInfo.lowPrice > 0 && price > 0 && price == stockInfo.lowPrice) ? RGB(0, 100, 0) : COLOR_GREEN_DOWN;
 	row.bold = (stockInfo.lowPrice > 0 && price > 0 && price == stockInfo.lowPrice);

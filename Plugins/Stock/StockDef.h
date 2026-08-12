@@ -471,6 +471,14 @@ namespace STOCK
 		bool isAskSide{ true };       // true=卖方，false=买方
 	};
 
+	// 盘口累计成交量（仅卖一/买一减少量计入，代表被吃掉的成交）
+	struct OrderBookCumVol
+	{
+		Price price{ 0.0 };          // 盘口价格
+		Volume cumVolume{ 0 };       // 累计成交量（手）
+		bool isAskSide{ true };      // true=卖方，false=买方
+	};
+
 	// 内外盘2秒采样数据（增量净比+增量成交量）
 	struct VolumeSample {
 		double netRatio;      // 增量净比 (Δ外-Δ内)/(Δ外+Δ内)*100
@@ -557,6 +565,9 @@ namespace STOCK
 
 		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量（股）
 		std::map<Price, OrderPriceAccum> orderPriceAccumMap;
+
+		// 10档盘口累计成交量（仅卖一/买一减少量计入，key=价格）
+		std::map<Price, OrderBookCumVol> orderBookCumVolMap;
 
 		// 使用智能指针管理历史数据
 		std::map<Period, std::shared_ptr<HistoricalDataBase>> historicalData;
@@ -763,6 +774,7 @@ namespace STOCK
 		// 更新内外盘采样并持久化（与数据来源解耦，任何数据源更新后都应调用）
 		void UpdateVolumeSample();
 		void UpdateOrderPriceAccum();  // 更新五档挂单变化量（+N/-N）
+		void UpdateOrderBookCumVol(Price prevAsk1, Price prevBid1);  // 更新10档盘口累计成交量
 
 		// 从secVolumePool获取加权平均净比和净差（minutes: 1/5/10/20）
 		// 不足目标条数时有多少根就计算多少根

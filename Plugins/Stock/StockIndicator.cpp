@@ -97,14 +97,30 @@ void CStockIndicator::CalcNiceAxisRange(double visMin, double visMax, double div
 	double range = visMax - visMin;
 	double niceStep = CalcNiceStep(range, divCount, minStep);
 
-	// 先对齐axisMin到niceStep的整数倍，确保数据完全包含在轴范围内
+	// 当niceStep被minStep强制提升后，divCount * niceStep可能远大于数据范围，
+	// 导致Y轴空间浪费、辅助线（如布林带）被挤到可视区外。
+	// 动态缩减divCount，使总范围更紧凑地包裹数据。
+	double actualDivCount = divCount;
+	if (niceStep > range / divCount + 1e-12)
+	{
+		double neededDivs = ceil((range + niceStep * 1e-9) / niceStep);
+		// 至少保留2个等分（3根刻度线），且不超过原始divCount
+		actualDivCount = (std::max)(2.0, (std::min)(neededDivs, divCount));
+	}
+
+	// 对齐axisMin到niceStep的整数倍
 	double axisMin = floor((visMin + niceStep * 1e-9) / niceStep) * niceStep;
-	double axisMax = axisMin + divCount * niceStep;
+	// 如果axisMin刚好贴着visMin（数据贴边），向下多留一个niceStep边距，
+	// 避免辅助线（如布林带下轨）超出可视区
+	if (fabs(axisMin - visMin) < niceStep * 1e-6)
+		axisMin -= niceStep;
+	double axisMax = axisMin + actualDivCount * niceStep;
 
 	// 如果axisRange不够包含所有数据，增加等分数
 	while (axisMax < visMax - 1e-9)
 	{
 		axisMax += niceStep;
+		actualDivCount += 1.0;
 	}
 
 	// 三位小数精度截断（与显示格式一致）
@@ -128,8 +144,19 @@ void CStockIndicator::CalcNiceAxisRangeSymmetric(double visMin, double visMax, d
 	double range = visMax - visMin;
 	double niceStep = CalcNiceStep(range, divCount, minStep);
 
+	// 当niceStep被minStep强制提升后，动态缩减divCount，避免Y轴范围过度扩展
+	double actualDivCount = divCount;
+	if (niceStep > range / divCount + 1e-12)
+	{
+		double neededDivs = ceil((range + niceStep * 1e-9) / niceStep);
+		// 对称模式需要偶数等分，至少2个
+		if (fmod(neededDivs, 2.0) > 1e-9)
+			neededDivs += 1.0;
+		actualDivCount = (std::max)(2.0, (std::min)(neededDivs, divCount));
+	}
+
 	double centerPrice = (visMin + visMax) / 2.0;
-	double halfAxisRange = (divCount / 2.0) * niceStep;
+	double halfAxisRange = (actualDivCount / 2.0) * niceStep;
 	outMin = centerPrice - halfAxisRange;
 	outMax = centerPrice + halfAxisRange;
 	outNiceStep = niceStep;

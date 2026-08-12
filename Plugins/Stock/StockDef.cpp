@@ -109,6 +109,10 @@ void STOCK::StockData::UpdateVolumeSample()
 
 void STOCK::StockData::UpdateOrderPriceAccum()
 {
+	// 记录更新前的卖一/买一价格（用于累计成交量判断）
+	Price prevAsk1 = (info.askLevels[0].price > 0) ? info.askLevels[0].price : 0;
+	Price prevBid1 = (info.bidLevels[0].price > 0) ? info.bidLevels[0].price : 0;
+
 	std::map<Price, OrderPriceAccum> currentPrices;
 	auto updateLevelAccum = [&](const OrderLevel& level, bool isAskSide) {
 		if (level.price <= 0)
@@ -132,10 +136,81 @@ void STOCK::StockData::UpdateOrderPriceAccum()
 		updateLevelAccum(info.bidLevels[i], false);
 	}
 
+	// 更新10档盘口累计成交量（在清理orderPriceAccumMap之前，以便处理即将消失的价格）
+	UpdateOrderBookCumVol(prevAsk1, prevBid1);
+
 	for (auto it = orderPriceAccumMap.begin(); it != orderPriceAccumMap.end(); )
 	{
 		if (currentPrices.find(it->first) == currentPrices.end())
 			it = orderPriceAccumMap.erase(it);
+		else
+			++it;
+	}
+}
+
+void STOCK::StockData::UpdateOrderBookCumVol(Price prevAsk1, Price prevBid1)
+{
+	// 收集当前五档中所有有效价格
+	std::map<Price, bool> currentPrices;  // price -> isAskSide
+	for (int i = 0; i < StockInfo::MAX_LEVEL; i++)
+	{
+		if (info.askLevels[i].price > 0)
+			currentPrices[info.askLevels[i].price] = true;
+		if (info.bidLevels[i].price > 0)
+			currentPrices[info.bidLevels[i].price] = false;
+	}
+
+	// 当前卖一和买一的价格
+	Price ask1Price = (info.askLevels[0].price > 0) ? info.askLevels[0].price : 0;
+	Price bid1Price = (info.bidLevels[0].price > 0) ? info.bidLevels[0].price : 0;
+
+	// 遍历orderPriceAccumMap中所有价格（含即将消失的），更新累计成交量
+	for (const auto& kv : orderPriceAccumMap)
+	{
+		Price price = kv.first;
+		Volume delta = kv.second.deltaVolume;
+		bool isAskSide = kv.second.isAskSide;
+
+		if (delta >= 0)
+			continue;  // 增加量不计入
+
+		// 判断该价格是否为卖一或买一
+		// 1. 如果价格仍在五档中，用当前卖一/买一价格判断
+		// 2. 如果价格已不在五档中（即将被移除），用更新前的卖一/买一价格判断
+		bool isAsk1 = false;
+		bool isBid1 = false;
+		auto cpIt = currentPrices.find(price);
+		if (cpIt != currentPrices.end())
+		{
+			// 价格仍在五档中
+			isAsk1 = (isAskSide && price == ask1Price);
+			isBid1 = (!isAskSide && price == bid1Price);
+		}
+		else
+		{
+			// 价格已不在五档中（被完全吃掉或撤单），用更新前的卖一/买一判断
+			isAsk1 = (isAskSide && price == prevAsk1);
+			isBid1 = (!isAskSide && price == prevBid1);
+		}
+
+		if (isAsk1 || isBid1)
+		{
+			auto cumIt = orderBookCumVolMap.find(price);
+			if (cumIt == orderBookCumVolMap.end() || cumIt->second.isAskSide != isAskSide)
+			{
+				// 新价格：先初始化再累加
+				orderBookCumVolMap[price] = { price, 0, isAskSide };
+				cumIt = orderBookCumVolMap.find(price);
+			}
+			cumIt->second.cumVolume += (-delta) / 100;  // 股转手
+		}
+	}
+
+	// 移除已不在五档中的价格
+	for (auto it = orderBookCumVolMap.begin(); it != orderBookCumVolMap.end(); )
+	{
+		if (currentPrices.find(it->first) == currentPrices.end())
+			it = orderBookCumVolMap.erase(it);
 		else
 			++it;
 	}

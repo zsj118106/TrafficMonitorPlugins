@@ -320,7 +320,6 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 	}
 
 	CPen pKLine(PS_SOLID, 1, COLOR_BLACK);
-	memDC.SelectObject(&pKLine);
 
 	std::vector<CPoint> dataPoints;
 	dataPoints.reserve(timelinePoint.size());
@@ -332,49 +331,9 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		dataPoints.push_back(CPoint(pointX, static_cast<int>(round(yVal))));
 	}
 
-	if (!dataPoints.empty())
+	// 均价线（点虚线，先画）
 	{
-		memDC.MoveTo(dataPoints[0].x, ctx.priceChartTop + ctx.priceChartHeight - dataPoints[0].y);
-		for (int i = 1; i < static_cast<int>(dataPoints.size()); i++)
-			memDC.LineTo(dataPoints[i].x, ctx.priceChartTop + ctx.priceChartHeight - dataPoints[i].y);
-
-		// 最高/最低价标签
-		{
-			STOCK::Price hiPrice = 0, loPrice = (std::numeric_limits<STOCK::Price>::max)();
-			int hiIdx = -1, loIdx = -1;
-			for (int i = 0; i < totalPoints; i++)
-			{
-				STOCK::Price p = timelinePoint[i].price;
-				if (p > 0)
-				{
-					if (p > hiPrice) { hiPrice = p; hiIdx = i; }
-					if (p >= hiPrice) { hiPrice = p; hiIdx = i; }
-					if (p < loPrice) { loPrice = p; loIdx = i; }
-					if (p <= loPrice) { loPrice = p; loIdx = i; }
-				}
-			}
-
-			STOCK::Price prevClose = ctx.realtimeData.prevClosePrice;
-
-			if (hiIdx >= 0 && hiPrice > 0)
-			{
-				int hiX = dataPoints[hiIdx].x;
-				int hiY = ctx.priceChartTop + ctx.priceChartHeight - dataPoints[hiIdx].y;
-				DrawPricePointLabel(memDC, hiX, hiY, 0, ctx.priceChartTop, ctx.chartWidth, ctx.priceChartHeight,
-					hiPrice, true, COLOR_RED_UP);
-			}
-
-			if (loIdx >= 0 && loPrice > 0 && loIdx != hiIdx)
-			{
-				int loX = dataPoints[loIdx].x;
-				int loY = ctx.priceChartTop + ctx.priceChartHeight - dataPoints[loIdx].y;
-				DrawPricePointLabel(memDC, loX, loY, 0, ctx.priceChartTop, ctx.chartWidth, ctx.priceChartHeight,
-					loPrice, false, COLOR_GREEN_DOWN);
-			}
-		}
-
-		// 均价线
-		CPen avgLinePen(PS_SOLID, 1, COLOR_GOLDEN);
+		CPen avgLinePen(PS_DASHDOT, 1, COLOR_GOLDEN);
 		CPen* pOldAvgPen = memDC.SelectObject(&avgLinePen);
 		bool firstAvgPoint = true;
 		for (int i = 0; i < totalPoints; i++)
@@ -443,7 +402,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		drawMALine(20, ma20Color);
 	}
 
-	// 布林带
+	// 布林带（短横线虚线）
 	if (hover.showBollBands)
 	{
 		const int N = 20;
@@ -486,7 +445,7 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 			};
 
 		auto drawBandLine = [&](const std::vector<double>& band, COLORREF color) {
-			CPen bandPen(PS_SOLID, 1, color);
+			CPen bandPen(PS_DASH, 1, color);
 			memDC.SelectObject(&bandPen);
 			bool first = true;
 			for (int i = 0; i < totalPoints; i++)
@@ -509,6 +468,50 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		drawBandLine(upperBand, COLOR_RED_UP);
 		drawBandLine(middleBand, RGB(0, 0, 230));
 		drawBandLine(lowerBand, COLOR_GREEN_DOWN);
+	}
+
+	// 走势线（黑色实线，最后画，覆盖在均价线和布林带之上）
+	if (!dataPoints.empty())
+	{
+		memDC.SelectObject(&pKLine);
+		memDC.MoveTo(dataPoints[0].x, ctx.priceChartTop + ctx.priceChartHeight - dataPoints[0].y);
+		for (int i = 1; i < static_cast<int>(dataPoints.size()); i++)
+			memDC.LineTo(dataPoints[i].x, ctx.priceChartTop + ctx.priceChartHeight - dataPoints[i].y);
+
+		// 最高/最低价标签
+		{
+			STOCK::Price hiPrice = 0, loPrice = (std::numeric_limits<STOCK::Price>::max)();
+			int hiIdx = -1, loIdx = -1;
+			for (int i = 0; i < totalPoints; i++)
+			{
+				STOCK::Price p = timelinePoint[i].price;
+				if (p > 0)
+				{
+					if (p > hiPrice) { hiPrice = p; hiIdx = i; }
+					if (p >= hiPrice) { hiPrice = p; hiIdx = i; }
+					if (p < loPrice) { loPrice = p; loIdx = i; }
+					if (p <= loPrice) { loPrice = p; loIdx = i; }
+				}
+			}
+
+			STOCK::Price prevClose = ctx.realtimeData.prevClosePrice;
+
+			if (hiIdx >= 0 && hiPrice > 0)
+			{
+				int hiX = dataPoints[hiIdx].x;
+				int hiY = ctx.priceChartTop + ctx.priceChartHeight - dataPoints[hiIdx].y;
+				DrawPricePointLabel(memDC, hiX, hiY, 0, ctx.priceChartTop, ctx.chartWidth, ctx.priceChartHeight,
+					hiPrice, true, COLOR_RED_UP);
+			}
+
+			if (loIdx >= 0 && loPrice > 0 && loIdx != hiIdx)
+			{
+				int loX = dataPoints[loIdx].x;
+				int loY = ctx.priceChartTop + ctx.priceChartHeight - dataPoints[loIdx].y;
+				DrawPricePointLabel(memDC, loX, loY, 0, ctx.priceChartTop, ctx.chartWidth, ctx.priceChartHeight,
+					loPrice, false, COLOR_GREEN_DOWN);
+			}
+		}
 	}
 
 	// 绘制基金净值曲线
@@ -1186,7 +1189,7 @@ void CTimelineChart::DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawConte
 			};
 
 		auto drawBandLine = [&](const std::vector<double>& band, COLORREF color) {
-			CPen bandPen(PS_SOLID, 1, color);
+			CPen bandPen(PS_DASH, 1, color);
 			memDC.SelectObject(&bandPen);
 			bool first = true;
 			for (int i = 0; i < totalPoints; i++)
@@ -1548,7 +1551,7 @@ void CTimelineChart::DrawDayKLinePriceChart(CDC& memDC, const TimelineDrawContex
 			};
 
 		auto drawBandLine = [&](const std::vector<double>& band, COLORREF color) {
-			CPen bandPen(PS_SOLID, 1, color);
+			CPen bandPen(PS_DASH, 1, color);
 			memDC.SelectObject(&bandPen);
 			bool first = true;
 			for (int i = 0; i < totalPoints; i++)

@@ -631,12 +631,18 @@ int CDataManager::UpdateRealtimeFromQuotes(const std::vector<QuoteItem>& items)
 		validCount++;
 	}
 
+	// 更新关联股票均幅统计:当前获取的是A股数据，关联的股票全部是港股
+	// if (validCount > 0)
+	// 	UpdateRelatedStocksAvgDiff();
+
 	return validCount;
 }
 
 void CDataManager::ApplyRealtimeData(const std::vector<std::wstring>& codes, const std::string& resp)
 {
 	stockMarket.LoadRealtimeDataByJson(resp, codes);
+	
+	UpdateRelatedStocksAvgDiff();
 }
 
 void CDataManager::ApplyInnerOuterData(const std::string& resp)
@@ -1076,11 +1082,6 @@ void CDataManager::SetAvgDiffStats(const std::wstring& code, double minVal, doub
 	}
 }
 
-void CDataManager::ResetAvgDiffStats(const std::wstring& code)
-{
-	m_avg_diff_stats.erase(code);
-}
-
 bool CDataManager::SaveAvgDiffStatsDb(const std::wstring& stockCode)
 {
 	auto it = m_avg_diff_stats.find(stockCode);
@@ -1123,21 +1124,91 @@ void CDataManager::CheckAndResetAvgDiffDaily()
 	}
 }
 
+void CDataManager::UpdateRelatedStocksAvgDiff()
+{
+	// 遍历所有配置了关联股票的股票，计算并更新均幅统计
+	for (const auto& item : m_stock_related)
+	{
+		const std::wstring& stockId = item.first;
+		const std::vector<std::wstring>& relatedCodes = item.second;
+		const int relatedCount = static_cast<int>(relatedCodes.size());
+		if (relatedCount < 1) continue;
+
+		double avgDiffPercent = 0.0;
+		int validCount = 0;
+
+		if (relatedCount == 1)
+		{
+			// 只有关联1只股票时，直接用该股票的最低价/最高价/实时价计算涨跌幅
+			auto stockData = GetStockData(relatedCodes[0]);
+			if (stockData && stockData->info.is_ok && stockData->info.prevClosePrice != 0)
+			{
+				double prevClose = stockData->info.prevClosePrice;
+				double lowPct = (stockData->info.lowPrice - prevClose) / prevClose * 100;
+				double highPct = (stockData->info.highPrice - prevClose) / prevClose * 100;
+				double curPct = stockData->info.GetChangePercent();
+				avgDiffPercent = curPct;
+				validCount = 1;
+
+				// 更新最低/最高/实时均幅（CheckAndResetAvgDiffDaily 保证开盘时清零旧数据）
+				SetAvgDiffStats(stockId, lowPct, highPct, avgDiffPercent);
+			}
+			else
+			{
+				continue;
+			}
+		}
+		else
+		{
+			// 多只关联股票时，计算平均涨幅
+			for (int i = 0; i < relatedCount; i++)
+			{
+				auto stockData = GetStockData(relatedCodes[i]);
+				if (stockData && stockData->info.is_ok)
+				{
+					double displayPrice = stockData->info.currentPrice > 0 ? stockData->info.currentPrice : stockData->info.prevClosePrice;
+					double diff = displayPrice - stockData->info.prevClosePrice;
+					if (stockData->info.prevClosePrice != 0)
+					{
+						avgDiffPercent += (diff / stockData->info.prevClosePrice) * 100;
+						validCount++;
+					}
+				}
+			}
+			if (validCount > 0)
+				avgDiffPercent /= validCount;
+			else
+				continue;
+
+			UpdateAvgDiffStats(stockId, avgDiffPercent);
+		}
+
+		// 每5秒采样一次均值到历史队列（最多60个，5分钟数据）
+		time_t sampleNow = time(nullptr);
+		time_t& lastSampleTime = m_avg_diff_last_sample_time[stockId];
+		if (sampleNow - lastSampleTime >= 5)
+		{
+			lastSampleTime = sampleNow;
+			PushAvgDiffHistory(stockId, avgDiffPercent);
+		}
+
+		// 每分钟保存最低/最高均幅到数据库（仅交易时段，避免非交易时间用昨日数据污染今日记录）
+		static time_t lastSaveTime = 0;
+		time_t now = time(nullptr);
+		if (now - lastSaveTime >= 60 && CCommon::IsMarketSession())
+		{
+			lastSaveTime = now;
+			SaveAvgDiffStatsDb(stockId);
+		}
+	}
+}
+
 void CDataManager::PushAvgDiffHistory(const std::wstring& code, double avgDiff)
 {
 	auto& queue = m_avg_diff_history[code];
 	queue.push_back(avgDiff);
 	if (queue.size() > 60)
 		queue.pop_front();
-}
-
-const std::deque<double>& CDataManager::GetAvgDiffHistory(const std::wstring& code)
-{
-	static const std::deque<double> emptyQueue;
-	auto it = m_avg_diff_history.find(code);
-	if (it != m_avg_diff_history.end())
-		return it->second;
-	return emptyQueue;
 }
 
 // 核心线性回归计算（纯计算，无IO）

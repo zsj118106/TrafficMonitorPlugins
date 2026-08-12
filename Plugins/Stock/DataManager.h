@@ -125,15 +125,16 @@ public:
 	AvgDiffStats GetAvgDiffData(const std::wstring& code);
 	void UpdateAvgDiffStats(const std::wstring& code, double avgDiff);
 	void SetAvgDiffStats(const std::wstring& code, double minVal, double maxVal, double currentVal);
-	void ResetAvgDiffStats(const std::wstring& code);
 	bool SaveAvgDiffStatsDb(const std::wstring& stockCode);
 
 	// 关联股票均值历史队列
 	void PushAvgDiffHistory(const std::wstring& code, double avgDiff);
-	const std::deque<double>& GetAvgDiffHistory(const std::wstring& code);
 
 	// 每日开盘重置均幅记录（跨天时自动清零）
 	void CheckAndResetAvgDiffDaily();
+
+	// 更新所有关联股票的均幅统计（计算+采样+存库），在获取到最新行情数据后调用
+	void UpdateRelatedStocksAvgDiff();
 
 	// 均值线性回归趋势（基于历史队列）
 	RegResult Get1MinAvgTrend(const std::wstring& code);   // 1分钟（最近12个点）
@@ -195,6 +196,9 @@ private:
 
 	// 关联股票均值历史队列: code -> deque<avg_diff>，每5秒采样一次，最多60个（5分钟）
 	std::map<std::wstring, std::deque<double>> m_avg_diff_history;
+
+	// 每个股票的上次采样时间戳，避免static变量导致多股票共享同一时间戳
+	std::map<std::wstring, time_t> m_avg_diff_last_sample_time;
 
 	// 每日重置跟踪：记录上次更新日期，跨天时标记待重置
 	std::string m_avg_diff_last_date;
