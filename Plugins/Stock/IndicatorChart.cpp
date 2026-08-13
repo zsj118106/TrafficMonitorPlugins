@@ -61,43 +61,91 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 		memDC.FillRect(CRect(barX, barY, barX + barWidth, zeroY + (barVal >= 0 ? 0 : barHeight)), &brush);
 	}
 
-	// 绘制 DIF 线（蓝色）
-	CPen difPen(PS_SOLID, 1, COLOR_DARK_ORANGE);
-	memDC.SelectObject(&difPen);
-	bool difFirst = true;
-	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(macdData.size()); i++)
+	// 绘制 DIF/DEA 双线（分段动态画笔：多头DIF粗橙实线+DEA浅灰细虚线，空头DEA粗蓝实线+DIF浅灰细虚线）
 	{
-		int idx = startIndex + i;
-		if (!macdData[idx].valid)
-			continue;
-		int pointX = x + static_cast<int>(width / static_cast<float>(xSlots) * i) + halfSlot;
-		int pointY = zeroY - static_cast<int>(macdData[idx].dif * unitY);
-		if (difFirst) { memDC.MoveTo(pointX, pointY); difFirst = false; }
-		else memDC.LineTo(pointX, pointY);
-	}
+		// 收集有效点的索引和坐标
+		struct MacdPoint { int x; int yDif; int yDea; double dif; double dea; };
+		std::vector<MacdPoint> pts;
+		pts.reserve(totalPts);
+		for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(macdData.size()); i++)
+		{
+			int idx = startIndex + i;
+			if (!macdData[idx].valid) continue;
+			int px = x + static_cast<int>(width / static_cast<float>(xSlots) * i) + halfSlot;
+			int pyDif = zeroY - static_cast<int>(macdData[idx].dif * unitY);
+			int pyDea = zeroY - static_cast<int>(macdData[idx].dea * unitY);
+			pts.push_back({ px, pyDif, pyDea, macdData[idx].dif, macdData[idx].dea });
+		}
+		if (pts.size() >= 2)
+		{
+			// 切分连续同状态区间（交叉点搭接1根bar，消除间隙）
+			enum EMacdState { STATE_LONG, STATE_SHORT };
+			struct Seg { int from; int to; EMacdState state; };
+			std::vector<Seg> segList;
+			int segStart = 0;
+			EMacdState curState = (pts[0].dif >= pts[0].dea) ? STATE_LONG : STATE_SHORT;
+			for (size_t i = 1; i < pts.size(); i++)
+			{
+				EMacdState st = (pts[i].dif >= pts[i].dea) ? STATE_LONG : STATE_SHORT;
+				if (st != curState)
+				{
+					segList.push_back({ segStart, static_cast<int>(i), curState });
+					segStart = static_cast<int>(i);
+					curState = st;
+				}
+			}
+			segList.push_back({ segStart, static_cast<int>(pts.size()) - 1, curState });
 
-	// 绘制 DEA 线（暗橙色）
-	CPen deaPen(PS_SOLID, 1, COLOR_BLUE_AVG1);
-	memDC.SelectObject(&deaPen);
-	bool deaFirst = true;
-	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(macdData.size()); i++)
-	{
-		int idx = startIndex + i;
-		if (!macdData[idx].valid)
-			continue;
-		int pointX = x + static_cast<int>(width / static_cast<float>(xSlots) * i) + halfSlot;
-		int pointY = zeroY - static_cast<int>(macdData[idx].dea * unitY);
-		if (deaFirst) { memDC.MoveTo(pointX, pointY); deaFirst = false; }
-		else memDC.LineTo(pointX, pointY);
+			// 分段绘制
+			for (const auto& seg : segList)
+			{
+				std::vector<CPoint> ptsDif, ptsDea;
+				ptsDif.reserve(seg.to - seg.from + 1);
+				ptsDea.reserve(seg.to - seg.from + 1);
+				for (int i = seg.from; i <= seg.to; i++)
+				{
+					ptsDif.push_back(CPoint(pts[i].x, pts[i].yDif));
+					ptsDea.push_back(CPoint(pts[i].x, pts[i].yDea));
+				}
+
+				if (seg.state == STATE_LONG)
+				{
+					// 多头：DIF粗橙色实线（主线），DEA细黑色实线（辅助）
+					CPen penMain(PS_SOLID, 2, COLOR_DARK_ORANGE);
+					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
+					memDC.SelectObject(&penMain);
+					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
+					memDC.SelectObject(&penSub);
+					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
+				}
+				else
+				{
+					// 空头：DEA粗蓝色实线（主线），DIF细黑色实线（辅助）
+					CPen penMain(PS_SOLID, 2, COLOR_BLUE_AVG1);
+					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
+					memDC.SelectObject(&penMain);
+					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
+					memDC.SelectObject(&penSub);
+					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
+				}
+			}
+		}
+		else if (pts.size() == 1)
+		{
+			// 单点：画小圆点
+			CPen penMain(PS_SOLID, 2, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_BLUE_AVG1);
+			memDC.SelectObject(&penMain);
+			memDC.SetPixel(pts[0].x, pts[0].yDif, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_BLACK);
+			memDC.SetPixel(pts[0].x, pts[0].yDea, (pts[0].dif >= pts[0].dea) ? COLOR_BLACK : COLOR_BLUE_AVG1);
+		}
 	}
 
 	memDC.SelectObject(pOldPen);
 
-	// 绘制金叉死叉标记（同方向5根K线内第一个显示标签，后续只绘制圆点）
+	// 绘制金叉死叉标记：金叉红色↑，死叉绿色↓，箭头紧贴圆点
 	auto crossSignals = CStockIndicator::DetectMACDCross(macdData);
 	const int dotRadius = g_data.RDPI(3);
 	const int smallDotRadius = g_data.RDPI(2);
-	const int labelOffset = 0;
 	int oldBkMode = memDC.SetBkMode(TRANSPARENT);
 
 	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(crossSignals.size()); i++)
@@ -111,30 +159,21 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 
 		bool isGolden = (crossSignals[idx] == MACDCrossSignal::GoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross);
 		bool isRepeated = (crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedDeathCross);
-		COLORREF dotColor = isGolden ? COLOR_GOLDEN : COLOR_BLACK;
 
-		// 重复信号只绘制小圆点，不显示标签
+		// 非重复信号先绘制箭头（从圆点边缘开始）
+		if (!isRepeated)
+		{
+			DrawCrossArrow(memDC, markX, markY, dotRadius, isGolden);
+		}
+
+		// 绘制圆点
 		int r = isRepeated ? smallDotRadius : dotRadius;
+		COLORREF dotColor = isGolden ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		CBrush dotBrush(dotColor);
 		CPen dotPen(PS_SOLID, 1, dotColor);
 		CBrush* pOldBrush = memDC.SelectObject(&dotBrush);
 		CPen* pOldDotPen = memDC.SelectObject(&dotPen);
 		memDC.Ellipse(markX - r, markY - r, markX + r, markY + r);
-
-		// 非重复信号显示标签
-		if (!isRepeated)
-		{
-			COLORREF labelColor = isGolden ? COLOR_GOLDEN : COLOR_GRAY_TEXT;
-			CString label = isGolden ? _T("g") : _T("d");
-			memDC.SetTextColor(labelColor);
-			CSize labelSize = memDC.GetTextExtent(label);
-			int labelY;
-			if (isGolden)
-				labelY = markY + dotRadius + labelOffset;
-			else
-				labelY = markY - dotRadius - labelOffset - labelSize.cy;
-			memDC.TextOut(markX - labelSize.cx / 2, labelY, label);
-		}
 
 		memDC.SelectObject(pOldBrush);
 		memDC.SelectObject(pOldDotPen);
@@ -1059,30 +1098,124 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 		memDC.FillRect(CRect(barX, barY, barX + barWidth, zeroY + (barVal >= 0 ? 0 : barHeight)), &brush);
 	}
 
-	CPen difPen(PS_SOLID, 1, COLOR_DARK_ORANGE);
-	memDC.SelectObject(&difPen);
-	bool difFirst = true;
-	for (int i = drawStart; i < drawEnd; i++)
+	// 绘制 DIF/DEA 双线（分段动态画笔：多头DIF粗橙实线+DEA浅灰细虚线，空头DEA粗蓝实线+DIF浅灰细虚线）
 	{
-		if (!macdData[i].valid) continue;
-		int pointX = x + (i - finalStartIndex) * slotWidth + slotWidth / 2;
-		int pointY = zeroY - static_cast<int>(macdData[i].dif * unitY);
-		if (difFirst) { memDC.MoveTo(pointX, pointY); difFirst = false; }
-		else memDC.LineTo(pointX, pointY);
+		struct MacdPoint { int x; int yDif; int yDea; double dif; double dea; };
+		std::vector<MacdPoint> pts;
+		for (int i = drawStart; i < drawEnd; i++)
+		{
+			if (!macdData[i].valid) continue;
+			int px = x + (i - finalStartIndex) * slotWidth + slotWidth / 2;
+			int pyDif = zeroY - static_cast<int>(macdData[i].dif * unitY);
+			int pyDea = zeroY - static_cast<int>(macdData[i].dea * unitY);
+			pts.push_back({ px, pyDif, pyDea, macdData[i].dif, macdData[i].dea });
+		}
+		if (pts.size() >= 2)
+		{
+			enum EMacdState { STATE_LONG, STATE_SHORT };
+			struct Seg { int from; int to; EMacdState state; };
+			std::vector<Seg> segList;
+			int segStart = 0;
+			EMacdState curState = (pts[0].dif >= pts[0].dea) ? STATE_LONG : STATE_SHORT;
+			for (size_t i = 1; i < pts.size(); i++)
+			{
+				EMacdState st = (pts[i].dif >= pts[i].dea) ? STATE_LONG : STATE_SHORT;
+				if (st != curState)
+				{
+					segList.push_back({ segStart, static_cast<int>(i), curState });
+					segStart = static_cast<int>(i);
+					curState = st;
+				}
+			}
+			segList.push_back({ segStart, static_cast<int>(pts.size()) - 1, curState });
+
+			for (const auto& seg : segList)
+			{
+				std::vector<CPoint> ptsDif, ptsDea;
+				ptsDif.reserve(seg.to - seg.from + 1);
+				ptsDea.reserve(seg.to - seg.from + 1);
+				for (int i = seg.from; i <= seg.to; i++)
+				{
+					ptsDif.push_back(CPoint(pts[i].x, pts[i].yDif));
+					ptsDea.push_back(CPoint(pts[i].x, pts[i].yDea));
+				}
+
+				if (seg.state == STATE_LONG)
+				{
+					CPen penMain(PS_SOLID, 2, COLOR_DARK_ORANGE);
+					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
+					memDC.SelectObject(&penMain);
+					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
+					memDC.SelectObject(&penSub);
+					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
+				}
+				else
+				{
+					CPen penMain(PS_SOLID, 2, COLOR_BLUE_AVG1);
+					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
+					memDC.SelectObject(&penMain);
+					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
+					memDC.SelectObject(&penSub);
+					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
+				}
+			}
+		}
+		else if (pts.size() == 1)
+		{
+			CPen penMain(PS_SOLID, 2, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_BLUE_AVG1);
+			memDC.SelectObject(&penMain);
+			memDC.SetPixel(pts[0].x, pts[0].yDif, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_MACD_SUB);
+			memDC.SetPixel(pts[0].x, pts[0].yDea, (pts[0].dif >= pts[0].dea) ? COLOR_MACD_SUB : COLOR_BLUE_AVG1);
+		}
 	}
 
-	CPen deaPen(PS_SOLID, 1, COLOR_BLUE_AVG1);
-	memDC.SelectObject(&deaPen);
-	bool deaFirst = true;
-	for (int i = drawStart; i < drawEnd; i++)
-	{
-		if (!macdData[i].valid) continue;
-		int pointX = x + (i - finalStartIndex) * slotWidth + slotWidth / 2;
-		int pointY = zeroY - static_cast<int>(macdData[i].dea * unitY);
-		if (deaFirst) { memDC.MoveTo(pointX, pointY); deaFirst = false; }
-		else memDC.LineTo(pointX, pointY);
-	}
+	memDC.SelectObject(pOldPen);
+}
 
+// ========== DrawCrossArrow ==========
+
+void CIndicatorChart::DrawCrossArrow(CDC& memDC, int markX, int markY, int dotRadius, bool isGolden)
+{
+	COLORREF arrowColor = isGolden ? COLOR_RED_UP : COLOR_GREEN_DOWN;
+	CBrush arrowBrush(arrowColor);
+	CPen arrowPen(PS_SOLID, 1, arrowColor);
+	CBrush* pOldBrush = memDC.SelectObject(&arrowBrush);
+	CPen* pOldPen = memDC.SelectObject(&arrowPen);
+	int aw = g_data.RDPI(3);    // 箭头头部半宽
+	int ah = g_data.RDPI(5);    // 箭头头部高度
+	int shaft = g_data.RDPI(7); // 箭头竖线长度
+	int sw = g_data.RDPI(1);    // 箭头竖线半宽
+	if (isGolden)
+	{
+		// ↑箭头：从圆点上边缘向上绘制（箭头头+竖线杆）
+		int base = markY - dotRadius;
+		CPoint pts[7] = {
+			CPoint(markX, base - ah - shaft),
+			CPoint(markX - aw, base - shaft),
+			CPoint(markX - sw, base - shaft),
+			CPoint(markX - sw, base),
+			CPoint(markX + sw, base),
+			CPoint(markX + sw, base - shaft),
+			CPoint(markX + aw, base - shaft)
+		};
+		memDC.Polygon(pts, 7);
+	}
+	else
+	{
+		// ↓箭头：从圆点下边缘向下绘制（箭头头+竖线杆）
+		int base = markY + dotRadius;
+		CPoint pts[7] = {
+			CPoint(markX, base + ah + shaft),
+			CPoint(markX - aw, base + shaft),
+			CPoint(markX - sw, base + shaft),
+			CPoint(markX - sw, base),
+			CPoint(markX + sw, base),
+			CPoint(markX + sw, base + shaft),
+			CPoint(markX + aw, base + shaft)
+		};
+		memDC.Polygon(pts, 7);
+	}
+	memDC.SelectObject(pOldBrush);
 	memDC.SelectObject(pOldPen);
 }
 
@@ -1277,30 +1410,21 @@ void CIndicatorChart::DrawTimelineKDJChart(CDC& memDC, int x, int y, int width, 
 
 		bool isGolden = (crossSignals[idx] == MACDCrossSignal::GoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross);
 		bool isRepeated = (crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedDeathCross);
-		COLORREF dotColor = isGolden ? COLOR_GOLDEN : COLOR_BLACK;
 
-		// 重复信号只绘制小圆点，不显示标签
+		// 非重复信号先绘制箭头（从圆点边缘开始）
+		if (!isRepeated)
+		{
+			DrawCrossArrow(memDC, markX, markY, dotRadius, isGolden);
+		}
+
+		// 绘制圆点
 		int r = isRepeated ? smallDotRadius : dotRadius;
+		COLORREF dotColor = isGolden ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		CBrush dotBrush(dotColor);
 		CPen dotPen(PS_SOLID, 1, dotColor);
 		CBrush* pOldBrush = memDC.SelectObject(&dotBrush);
 		CPen* pOldDotPen = memDC.SelectObject(&dotPen);
 		memDC.Ellipse(markX - r, markY - r, markX + r, markY + r);
-
-		// 非重复信号显示标签
-		if (!isRepeated)
-		{
-			COLORREF labelColor = isGolden ? COLOR_GOLDEN : COLOR_GRAY_TEXT;
-			CString label = isGolden ? _T("g") : _T("d");
-			memDC.SetTextColor(labelColor);
-			CSize labelSize = memDC.GetTextExtent(label);
-			int labelY;
-			if (isGolden)
-				labelY = markY + dotRadius;
-			else
-				labelY = markY - dotRadius - labelSize.cy;
-			memDC.TextOut(markX - labelSize.cx / 2, labelY, label);
-		}
 
 		memDC.SelectObject(pOldBrush);
 		memDC.SelectObject(pOldDotPen);

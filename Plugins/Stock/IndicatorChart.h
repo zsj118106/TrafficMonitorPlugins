@@ -107,4 +107,8 @@ public:
 private:
     // 绘制网格线和时间标签（分时指标区域共用）
     void DrawSectionGridAndTimeLabels(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight, bool drawTimeLabels);
+
+    // 绘制金叉死叉箭头标记（从圆点边缘开始，箭头头+竖线杆）
+    // markX/markY: 标记中心坐标  dotRadius: 圆点半径  isGolden: 金叉true/死叉false
+    void DrawCrossArrow(CDC& memDC, int markX, int markY, int dotRadius, bool isGolden);
 };
