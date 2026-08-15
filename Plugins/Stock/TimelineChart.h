@@ -37,15 +37,19 @@ public:
 		int timelineLastTotalPoints{ 0 };
 		std::wstring stockId;
 		CPoint mousePos;
+		// 信号颜色（由DrawPriceChartArea设置，供CFloatingWnd更新按钮文字颜色）
+		COLORREF bollSignalColor{ CLR_INVALID };   // BL按钮信号颜色：超买=绿色，超卖=红色
+		COLORREF macdSignalColor{ CLR_INVALID };   // MACD按钮信号颜色：金叉=红色，死叉=绿色
+		COLORREF kdjSignalColor{ CLR_INVALID };     // KDJ按钮信号颜色
+		COLORREF wrSignalColor{ CLR_INVALID };      // W&R按钮信号颜色
+		COLORREF rsiSignalColor{ CLR_INVALID };     // RSI按钮信号颜色
 	};
-
-	// 坐标转换：分时数据点→屏幕坐标
-	static CPoint Stock2Point(int x, int y, int w, int h, double unitY, const STOCK::TimelinePoint& item, const STOCK::Price prevClosePrice);
 
 	// 分时图绘制
 	void DrawTimelineHeader(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
-	void DrawTimelineMAIndicators(CDC& memDC, const TimelineDrawContext& ctx);
-	void DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx);
+	void DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx, UIViewMode viewMode);
+	// 在指定区域绘制分时背景高亮（5分钟交替），供价格区/成交量/MACD/KDJ等区域复用
+	static void DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight, UIViewMode viewMode);
 	void DrawTimelineGridLines(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelinePriceLabels(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelineCostAndProfitLines(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
@@ -57,9 +61,6 @@ public:
 	void DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
 	void DrawDayKLinePriceChart(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
 
-	// 分时量柱区域
-	void DrawTimelineVolumeSection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
-
 	// 价格区域（标题栏+走势图一体化）
-	void DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, const HoverState& hover);
+	void DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, HoverState& hover);
 };

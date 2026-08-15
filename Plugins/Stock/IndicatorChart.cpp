@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "IndicatorChart.h"
+#include "TimelineChart.h"
 #include "ChartColors.h"
 #include "Common.h"
 #include "DataManager.h"
@@ -147,6 +148,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 	const int dotRadius = g_data.RDPI(3);
 	const int smallDotRadius = g_data.RDPI(2);
 	int oldBkMode = memDC.SetBkMode(TRANSPARENT);
+	int lastDrawnDir = 0; // 0=无, 1=金叉, -1=死叉
 
 	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(crossSignals.size()); i++)
 	{
@@ -159,15 +161,18 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 
 		bool isGolden = (crossSignals[idx] == MACDCrossSignal::GoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross);
 		bool isRepeated = (crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedDeathCross);
+		int curDir = isGolden ? 1 : -1;
 
-		// 非重复信号先绘制箭头（从圆点边缘开始）
-		if (!isRepeated)
+		// 方向反转时始终绘制箭头；同方向重复则只画圆点
+		bool drawArrow = !isRepeated || (curDir != lastDrawnDir);
+		if (drawArrow)
 		{
 			DrawCrossArrow(memDC, markX, markY, dotRadius, isGolden);
+			lastDrawnDir = curDir;
 		}
 
 		// 绘制圆点
-		int r = isRepeated ? smallDotRadius : dotRadius;
+		int r = (isRepeated && !drawArrow) ? smallDotRadius : dotRadius;
 		COLORREF dotColor = isGolden ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		CBrush dotBrush(dotColor);
 		CPen dotPen(PS_SOLID, 1, dotColor);
@@ -281,6 +286,9 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 	tmpCtx.volumeChartTop = areaTop + titleH;
 	tmpCtx.volumeChartHeight = areaHeight - titleH;
 
+	// 先绘制背景高亮，确保数据不被覆盖
+	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight, hover.viewMode);
+
 	DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
 
 	if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
@@ -381,7 +389,7 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 	if (ctx.timelinePoint && !ctx.timelinePoint->empty())
 	{
 		const int totalPts = static_cast<int>(ctx.timelinePoint->size());
-		const int numVLines = 4;
+		const int numVLines = 6;
 		for (int i = 0; i <= numVLines; i++)
 		{
 			int xPos2 = ctx.chartWidth * i / numVLines;
@@ -394,7 +402,7 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 	if (drawTimeLabels && !timelinePoint.empty())
 	{
 		const int totalPts = static_cast<int>(timelinePoint.size());
-		const int numVLines = 4;
+		const int numVLines = 6;
 		memDC.SetTextColor(COLOR_GRAY_TEXT);
 		for (int i = 0; i <= numVLines; i++)
 		{
@@ -562,6 +570,9 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 
 	memDC.SetBkMode(oldBkMode);
 
+	// 先绘制背景高亮，确保数据不被覆盖
+	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
+
 	DrawMACDChart(memDC, 0, tmpCtx.macdChartTop, ctx.chartWidth, tmpCtx.macdChartHeight, timelinePoint, macdData, ctx.startIndex, -1, ctx.xAxisPoints);
 
 	CPen pGrid(PS_SOLID, 1, COLOR_GRAY_GRID);
@@ -573,7 +584,7 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 	memDC.LineTo(ctx.chartWidth, macdY + tmpCtx.macdChartHeight);
 
 	const int totalPts = static_cast<int>(timelinePoint.size());
-	const int numVLines = 4;
+	const int numVLines = 6;
 	if (totalPts > 0)
 	{
 		for (int i = 0; i <= numVLines; i++)
@@ -872,18 +883,21 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
 		DrawTimelineKDJSection(memDC, tmpCtx, hover);
 	}
 	else if (indicator == TimelineIndicator::WR)
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
 		DrawTimelineWRSection(memDC, tmpCtx, hover);
 	}
 	else if (indicator == TimelineIndicator::RSI)
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
 		DrawTimelineRSISection(memDC, tmpCtx, hover);
 	}
 	else
@@ -891,6 +905,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 		// 成交量模式（MACD枚举值现在表示成交量）
 		tmpCtx.volumeChartTop = areaTop + titleH;
 		tmpCtx.volumeChartHeight = areaHeight - titleH;
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight, hover.viewMode);
 		DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
 
 		if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
@@ -993,7 +1008,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 		if (ctx.timelinePoint && !ctx.timelinePoint->empty())
 		{
 			const int totalPts = static_cast<int>(ctx.timelinePoint->size());
-			const int numVLines = 4;
+			const int numVLines = 6;
 			for (int i = 0; i <= numVLines; i++)
 			{
 				int xPos = ctx.chartWidth * i / numVLines;
@@ -1008,7 +1023,7 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 	if (drawTimeLabels && !timelinePoint.empty())
 	{
 		const int totalPts = static_cast<int>(timelinePoint.size());
-		const int numVLines = 4;
+		const int numVLines = 6;
 		memDC.SetTextColor(COLOR_GRAY_TEXT);
 		int chartBottom = areaTop + areaHeight;
 		for (int i = 0; i <= numVLines; i++)
@@ -1231,7 +1246,7 @@ void CIndicatorChart::DrawSectionGridAndTimeLabels(CDC& memDC, const TimelineDra
 	memDC.MoveTo(0, chartTop + chartHeight);
 	memDC.LineTo(ctx.chartWidth, chartTop + chartHeight);
 	const int totalPts = static_cast<int>(timelinePoint.size());
-	const int numVLines = 4;
+	const int numVLines = 6;
 	if (totalPts > 0)
 	{
 		for (int i = 0; i <= numVLines; i++)
@@ -1257,26 +1272,6 @@ void CIndicatorChart::DrawSectionGridAndTimeLabels(CDC& memDC, const TimelineDra
 			memDC.TextOut(labelX, chartTop + chartHeight + g_data.RDPI(2), timeLabel);
 		}
 	}
-}
-
-// ========== DrawTimelineMACDSection ==========
-
-void CIndicatorChart::DrawTimelineMACDSection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover)
-{
-	const auto& timelinePoint = *ctx.timelinePoint;
-	// 5分钟K线用7,15,5参数，分时(1分钟)用6,12,4参数，30分钟和日K用默认12,26,9
-	int shortP = 12, longP = 26, signalP = 9;
-	if (hover.viewMode == UI_VIEW_MIN5_KLINE)
-	{
-		shortP = 7; longP = 15; signalP = 5;
-	}
-	else if (hover.viewMode == UI_VIEW_TIMELINE)
-	{
-		shortP = 6; longP = 12; signalP = 4;
-	}
-	auto macdData = CStockIndicator::CalculateTimelineMACD(timelinePoint, shortP, longP, signalP);
-	DrawMACDChart(memDC, 0, ctx.macdChartTop, ctx.chartWidth, ctx.macdChartHeight, timelinePoint, macdData, 0, -1, ctx.xAxisPoints);
-	DrawSectionGridAndTimeLabels(memDC, ctx, ctx.macdChartTop, ctx.macdChartHeight, true);
 }
 
 // ========== DrawTimelineKDJSection ==========
@@ -1398,6 +1393,7 @@ void CIndicatorChart::DrawTimelineKDJChart(CDC& memDC, int x, int y, int width, 
 	const int dotRadius = g_data.RDPI(3);
 	const int smallDotRadius = g_data.RDPI(2);
 	int oldBkMode = memDC.SetBkMode(TRANSPARENT);
+	int lastDrawnDir = 0; // 0=无, 1=金叉, -1=死叉
 
 	for (int i = 0; i < totalPts && (startIndex + i) < static_cast<int>(crossSignals.size()); i++)
 	{
@@ -1410,15 +1406,18 @@ void CIndicatorChart::DrawTimelineKDJChart(CDC& memDC, int x, int y, int width, 
 
 		bool isGolden = (crossSignals[idx] == MACDCrossSignal::GoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross);
 		bool isRepeated = (crossSignals[idx] == MACDCrossSignal::RepeatedGoldenCross || crossSignals[idx] == MACDCrossSignal::RepeatedDeathCross);
+		int curDir = isGolden ? 1 : -1;
 
-		// 非重复信号先绘制箭头（从圆点边缘开始）
-		if (!isRepeated)
+		// 方向反转时始终绘制箭头；同方向重复则只画圆点
+		bool drawArrow = !isRepeated || (curDir != lastDrawnDir);
+		if (drawArrow)
 		{
 			DrawCrossArrow(memDC, markX, markY, dotRadius, isGolden);
+			lastDrawnDir = curDir;
 		}
 
 		// 绘制圆点
-		int r = isRepeated ? smallDotRadius : dotRadius;
+		int r = (isRepeated && !drawArrow) ? smallDotRadius : dotRadius;
 		COLORREF dotColor = isGolden ? COLOR_RED_UP : COLOR_GREEN_DOWN;
 		CBrush dotBrush(dotColor);
 		CPen dotPen(PS_SOLID, 1, dotColor);
@@ -1701,141 +1700,4 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 	}
 }
 
-// ========== DrawKDJChart（K线模式） ==========
-
-void CIndicatorChart::DrawKDJChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::KLinePoint>& klineData, int klinePeriodDays, int scrollOffset)
-{
-	if (klineData.empty())
-		return;
-
-	auto kdjData = CStockIndicator::CalculateKDJ(klineData);
-	if (kdjData.empty())
-		return;
-
-	double minVal = 0;
-	double maxVal = 100;
-	for (const auto& kd : kdjData)
-	{
-		if (!kd.valid) continue;
-		minVal = (std::min)(minVal, kd.j);
-		maxVal = (std::max)(maxVal, kd.j);
-	}
-	if (minVal > 0) minVal = 0;
-	if (maxVal < 100) maxVal = 100;
-
-	const int padding = g_data.RDPI(4);
-	int drawHeight = height - padding * 2;
-	if (drawHeight <= 0) return;
-
-	auto valueToY = [&](double val) {
-		double ratio = (val - minVal) / (maxVal - minVal);
-		return y + padding + static_cast<int>((1.0 - ratio) * drawHeight);
-		};
-
-	int oldBkMode = memDC.SetBkMode(TRANSPARENT);
-
-	memDC.FillSolidRect(CRect(x, y, x + width, y + height), COLOR_WHITE);
-
-	CPen gridPen(PS_DASHDOT, 1, COLOR_GRAY_GRID);
-	CPen* pOldPen = memDC.SelectObject(&gridPen);
-	double gridValues[] = { 0, 20, 50, 80, 100 };
-	for (double v : gridValues)
-	{
-		if (v < minVal || v > maxVal) continue;
-		int gy = valueToY(v);
-		memDC.MoveTo(x, gy);
-		memDC.LineTo(x + width, gy);
-	}
-	memDC.SelectObject(pOldPen);
-
-	memDC.SetTextColor(COLOR_GRAY_TEXT);
-	for (double v : gridValues)
-	{
-		if (v < minVal || v > maxVal) continue;
-		int gy = valueToY(v);
-		CString label;
-		label.Format(_T("%d"), static_cast<int>(v));
-		CSize sz = memDC.GetTextExtent(label);
-		memDC.DrawText(label, CRect(x + g_data.RDPI(2), gy - sz.cy / 2, x + g_data.RDPI(30), gy + sz.cy / 2), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-	}
-
-	const int minBarWidth = 7;
-	const int gap = 1;
-	int displayCount = min(klinePeriodDays, static_cast<int>(klineData.size()));
-	int maxVisibleKlines = min(displayCount, width / (minBarWidth + gap));
-	int scrollRange = max(0, displayCount - maxVisibleKlines);
-	int scrollPos = min(scrollOffset, scrollRange);
-	int finalStartIndex = max(0, static_cast<int>(klineData.size()) - maxVisibleKlines - scrollPos);
-	int barWidth = max(minBarWidth, (width - gap * (maxVisibleKlines - 1)) / maxVisibleKlines);
-
-	int endIndex = min(static_cast<int>(klineData.size()), finalStartIndex + maxVisibleKlines);
-
-	auto indexToX = [&](int i) {
-		return x + (i - finalStartIndex) * (barWidth + gap) + barWidth / 2;
-		};
-
-	for (int i = finalStartIndex; i < endIndex; i++)
-	{
-		const auto& item = klineData[i];
-		if (item.high <= 0 || item.low <= 0 || item.close <= 0 || item.open <= 0)
-			continue;
-
-		int barX = x + (i - finalStartIndex) * (barWidth + gap);
-		bool isUp = (item.close >= item.open);
-		COLORREF color = isUp ? COLOR_RED_UP : COLOR_GREEN_DOWN;
-
-		STOCK::Price highest = item.high;
-		STOCK::Price lowest = item.low;
-		STOCK::Price openP = item.open;
-		STOCK::Price closeP = item.close;
-
-		int highY = valueToY(highest);
-		int lowY = valueToY(lowest);
-		int openY = valueToY(openP);
-		int closeY = valueToY(closeP);
-
-		CPen barPen(PS_SOLID, 1, color);
-		memDC.SelectObject(&barPen);
-		memDC.MoveTo(barX + barWidth / 2, highY);
-		memDC.LineTo(barX + barWidth / 2, lowY);
-
-		CBrush barBrush(color);
-		CRect bodyRect(barX, (std::min)(openY, closeY), barX + barWidth, (std::max)(openY, closeY) + 1);
-		if (bodyRect.Height() < 1) bodyRect.bottom = bodyRect.top + 1;
-		memDC.FillRect(bodyRect, &barBrush);
-	}
-
-	auto drawLine = [&](int lineIdx, COLORREF color, double KDJData::* field) {
-		CPen linePen(PS_SOLID, 1, color);
-		memDC.SelectObject(&linePen);
-		bool first = true;
-		for (int i = finalStartIndex; i < endIndex; i++)
-		{
-			if (i >= static_cast<int>(kdjData.size()) || !kdjData[i].valid)
-				continue;
-			int px = indexToX(i);
-			int py = valueToY(kdjData[i].*field);
-			if (first)
-			{
-				memDC.MoveTo(px, py);
-				first = false;
-			}
-			else
-			{
-				memDC.LineTo(px, py);
-			}
-		}
-		};
-
-	drawLine(0, COLOR_RED_UP, &KDJData::k);
-	drawLine(1, RGB(0, 68, 204), &KDJData::d);
-	drawLine(2, COLOR_GRAY_PURPLE, &KDJData::j);
-
-	memDC.SelectObject(pOldPen);
-
-	CString title = _T("KDJ");
-	memDC.SetTextColor(COLOR_BLACK);
-	memDC.DrawText(title, CRect(x + g_data.RDPI(2), y, x + width, y + g_data.RDPI(16)), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-
-	memDC.SetBkMode(oldBkMode);
-}
+// ========== DrawTimelineKDJChart ==========

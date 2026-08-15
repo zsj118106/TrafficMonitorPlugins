@@ -7,18 +7,13 @@
 #include <vector>
 
 // ============================================================================
-// CStockIndicator: 股票指标计算类（纯计算，无UI依赖）
+// CStockIndicator: 股票指标兼容层（纯计算，无UI依赖）
 // ----------------------------------------------------------------------------
-// 从CFloatingWnd抽取出来的所有股票指标计算逻辑，包括：
-//   - 滚动均价（MA5/MA10/MA20）
-//   - Y轴整齐刻度（Nice Number算法）
-//   - MACD指标（分时/K线）
-//   - KDJ指标（分时/K线）
-//   - W&R威廉指标（分时/K线）
-//   - RSI相对强弱指标（分时/K线）
-//   - MACD金叉死叉检测
-//   - T+0日内买卖点判定
-//   - K线周期高低点统计
+// 指标计算逻辑已统一迁移到 CSignalAnalyzer，本类仅保留：
+//   - 滚动均价（MA5/MA10/MA20，依赖TimelinePoint的amount/volume，非标准指标）
+//   - Y轴整齐刻度（Nice Number算法，纯UI辅助）
+//   - K线周期高低点统计（UI标记用）
+//   - 兼容旧调用的委托函数（内部调用CSignalAnalyzer统一实现）
 // 所有函数都是static，无状态，可在任意线程调用。
 // ============================================================================
 class CStockIndicator
@@ -77,9 +72,6 @@ public:
 	// 为每个分时数据点计算MA5/MA10/MA20滚动均价（滑动窗口，修改timelinePoint中的ma5/ma10/ma20字段）
 	static void CalcAllRollingAvgPrices(std::vector<STOCK::TimelinePoint>& timelinePoint);
 
-	// 计算滚动均价：最近nMinutes分钟的成交额/成交量（单次查询）
-	static STOCK::Price CalcRollingAvgPrice(const std::vector<STOCK::TimelinePoint>& timelinePoint, int nMinutes);
-
 	// ========== Y轴整齐刻度计算（Nice Number算法） ==========
 
 	// 计算Y轴整齐刻度步长（1-2-3-4-5-10序列）
@@ -100,16 +92,8 @@ public:
 	static std::vector<MACDData> CalculateTimelineMACD(const std::vector<STOCK::TimelinePoint>& timelinePoint,
 		int shortPeriod = 12, int longPeriod = 26, int signalPeriod = 9);
 
-	// 计算K线MACD序列（基于KLinePoint.close）
-	// shortPeriod/longPeriod/signalPeriod: MACD三参数，默认12/26/9
-	static std::vector<MACDData> CalculateKLineMACD(const std::vector<STOCK::KLinePoint>& klineData,
-		int shortPeriod = 12, int longPeriod = 26, int signalPeriod = 9);
-
 	// 检测MACD金叉死叉序列（返回每个位置的信号）
 	static std::vector<MACDCrossSignal> DetectMACDCross(const std::vector<MACDData>& macdData);
-
-	// 获取最近一次MACD金叉死叉信号
-	static MACDCrossSignal GetLatestMACDCross(const std::vector<MACDData>& macdData);
 
 	// 计算DIF趋势（线性回归斜率），用于判断DIF线方向
 	// macdData: MACD序列；lookback: 回看窗口长度，默认6
@@ -119,16 +103,6 @@ public:
 
 	// 检测KDJ金叉死叉序列（金叉：K上穿D且前一根K<=30，死叉：K下穿D且前一根K>=70）
 	static std::vector<MACDCrossSignal> DetectKDJCross(const std::vector<KDJData>& kdjData);
-
-	// ========== T+0日内买卖点判定 ==========
-
-	// 检测买点信号（基于分时数据+MACD）
-	static CSignalAnalyzer::T0Signal DetectBuySignal(const std::vector<STOCK::TimelinePoint>& timelinePoint,
-		const std::vector<MACDData>& macdData);
-
-	// 检测卖点信号（基于分时数据+MACD）
-	static CSignalAnalyzer::T0Signal DetectSellSignal(const std::vector<STOCK::TimelinePoint>& timelinePoint,
-		const std::vector<MACDData>& macdData);
 
 	// ========== KDJ指标计算 ==========
 

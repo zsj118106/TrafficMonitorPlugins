@@ -446,21 +446,6 @@ bool CStockDbManager::SaveTimelineCache(const std::wstring& stockCode, const std
 	return ok;
 }
 
-bool CStockDbManager::HasTimelineCache(const std::wstring& stockCode)
-{
-	if (m_db == nullptr) return false;
-	// 检查7天内是否有分时缓存
-	std::string cutoffDate = GetCacheCutoffDateString();
-	const char* sql = "SELECT 1 FROM timeline_cache WHERE stock_code = ? AND trade_date >= ? LIMIT 1;";
-	sqlite3_stmt* stmt = nullptr;
-	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
-	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(stmt, 2, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
-	bool hasCache = sqlite3_step(stmt) == SQLITE_ROW;
-	sqlite3_finalize(stmt);
-	return hasCache;
-}
-
 std::vector<STOCK::TimelinePoint> CStockDbManager::LoadTimelineCache(const std::wstring& stockCode, const std::string& tradeDate)
 {
 	std::vector<STOCK::TimelinePoint> points;
@@ -808,22 +793,6 @@ AvgDiffStats CStockDbManager::LoadAvgDiffStats(const std::wstring& stockCode)
 	return result;
 }
 
-void CStockDbManager::CleanExpiredAvgDiffStats()
-{
-	if (m_db == nullptr) return;
-
-	// 只删除7天前的过期数据，保留昨天的记录（非交易时间重启可显示最近的最低/最高）
-	std::string cutoffDate = GetCacheCutoffDateString();
-	const char* sql = "DELETE FROM avg_diff_stats WHERE update_time < ?;";
-	sqlite3_stmt* stmt = nullptr;
-	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
-	{
-		sqlite3_bind_text(stmt, 1, cutoffDate.c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_step(stmt);
-	}
-	sqlite3_finalize(stmt);
-}
-
 bool CStockDbManager::SaveFundNavCache(const std::wstring& stockCode, const std::vector<STOCK::TimelinePoint>& data)
 {
 	if (m_db == nullptr || data.empty()) return false;
@@ -904,16 +873,3 @@ std::vector<STOCK::TimelinePoint> CStockDbManager::LoadLatestFundNavCache(const 
 	return points;
 }
 
-bool CStockDbManager::HasFundNavCache(const std::wstring& stockCode)
-{
-	if (m_db == nullptr) return false;
-	const char* sql = "SELECT 1 FROM fund_nav_cache WHERE stock_code = ? AND trade_date = ? LIMIT 1;";
-	sqlite3_stmt* stmt = nullptr;
-	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
-	std::string tradeDate = GetTodayDateString();
-	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
-	sqlite3_bind_text(stmt, 2, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
-	bool hasCache = sqlite3_step(stmt) == SQLITE_ROW;
-	sqlite3_finalize(stmt);
-	return hasCache;
-}

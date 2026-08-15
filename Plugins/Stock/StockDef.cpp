@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "StockDef.h"
+#include "SignalAnalyzer.h"
 #include <iomanip>
 #include "Common.h"
 #include <DataManager.h>
@@ -932,22 +933,6 @@ void STOCK::StockMarket::LoadTimelineDataByJson(std::wstring stock_id, CString* 
 	Stock::Instance().UpdateKLine();
 }
 
-std::wstring STOCK::StockData::GetCurrentDisplay(bool include_name) const
-{
-	std::wstringstream wss;
-	if (info.is_ok)
-	{
-		if (include_name)
-			wss << info.displayName << ": ";
-		wss << info.displayPrice << ' ' << info.displayFluctuationDiff << info.displayFluctuation;
-	}
-	else
-	{
-		wss << info.code + L" " + g_data.StringRes(IDS_LOAD_FAIL).GetString();
-	}
-	return wss.str();
-}
-
 static Volume GetJsonVolume(yyjson_val* obj, const char* key)
 {
 	if (obj != nullptr)
@@ -1368,15 +1353,12 @@ double STOCK::KLineData::CalculateMA(int period) const
 	if (data.empty() || period <= 0)
 		return 0;
 
-	int startIdx = max(0, static_cast<int>(data.size()) - period);
-	double sum = 0;
-	int count = 0;
-	for (int i = startIdx; i < data.size(); i++)
-	{
-		sum += data[i].close;
-		count++;
-	}
-	return count > 0 ? sum / count : 0;
+	// 提取收盘价序列，委托统一计算（数据不足时仍计算）
+	std::vector<double> closes;
+	closes.reserve(data.size());
+	for (const auto& pt : data)
+		closes.push_back(pt.close);
+	return CSignalAnalyzer::CalcMA(closes, period, false);
 }
 
 double STOCK::KLineData::CalculateMAPeriod(int days, int totalDays) const
@@ -1421,93 +1403,6 @@ double STOCK::KLineData::CalculateAverageAmplitude(int days) const
 		count++;
 	}
 	return count > 0 ? totalAmplitude / count : 0;
-}
-
-double STOCK::KLineData::GetMaxPrice(int days) const
-{
-	if (data.empty() || days <= 0)
-		return 0;
-
-	int startIdx = max(0, static_cast<int>(data.size()) - days);
-	double maxPrice = 0;
-	for (int i = startIdx; i < data.size(); i++)
-	{
-		if (data[i].high > maxPrice)
-			maxPrice = data[i].high;
-	}
-	return maxPrice;
-}
-
-double STOCK::KLineData::GetMinPrice(int days) const
-{
-	if (data.empty() || days <= 0)
-		return 0;
-
-	int startIdx = max(0, static_cast<int>(data.size()) - days);
-	double minPrice = (std::numeric_limits<double>::max)();
-	for (int i = startIdx; i < data.size(); i++)
-	{
-		if (data[i].low < minPrice)
-			minPrice = data[i].low;
-	}
-	return minPrice;
-}
-
-double STOCK::KLineData::GetAverageClosePrice(int days) const
-{
-	if (data.empty() || days <= 0)
-		return 0;
-
-	int startIdx = max(0, static_cast<int>(data.size()) - days);
-	double sum = 0;
-	int count = 0;
-	for (int i = startIdx; i < data.size(); i++)
-	{
-		sum += data[i].close;
-		count++;
-	}
-	return count > 0 ? sum / count : 0;
-}
-
-STOCK::KLineData::PeriodStats STOCK::KLineData::GetPeriodStats(int days) const
-{
-	PeriodStats stats;
-	if (data.empty() || days <= 0)
-		return stats;
-
-	const int DAYS_PER_YEAR = 250;
-	int startIdx = max(0, static_cast<int>(data.size()) - days * DAYS_PER_YEAR);
-	int endIdx = static_cast<int>(data.size()) - 1;
-
-	double maxPrice = 0;
-	double minPrice = (std::numeric_limits<double>::max)();
-	double sumPrice = 0;
-	int count = 0;
-
-	for (int i = startIdx; i <= endIdx; i++)
-	{
-		if (data[i].high > maxPrice)
-		{
-			maxPrice = data[i].high;
-			stats.maxDate = data[i].day;
-		}
-		if (data[i].low < minPrice)
-		{
-			minPrice = data[i].low;
-			stats.minDate = data[i].day;
-		}
-		sumPrice += data[i].close;
-		count++;
-	}
-
-	if (count == 0)
-		return stats;
-
-	stats.maxPrice = maxPrice;
-	stats.minPrice = minPrice;
-	stats.avgPrice = sumPrice / count;
-	stats.isValid = true;
-	return stats;
 }
 
 // ========== StockData 持仓计算方法实现 ==========

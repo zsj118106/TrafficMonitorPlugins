@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <iostream>
 #include <sstream>
@@ -75,9 +75,6 @@ public:
 	//获取URL的内容
 	static bool GetURL(const std::wstring& url, std::string& result, bool utf8 = false, LPCTSTR pstrAgent = NULL, const LPCTSTR headers = NULL, DWORD dwHeadersLength = 0);
 
-	//将一个字符串转换成URL编码（以UTF8编码格式）
-	static std::wstring URLEncode(const std::wstring& wstr);
-
 	//将一个日志信息str_text写入到file_path文件中
 	static void WriteLog(const WORD w, LPCTSTR file_path);
 	static void WriteLog(const char* str_text, LPCTSTR file_path);
@@ -112,12 +109,6 @@ public:
 	// showPercentFirst=true: "+X.XX%(+Y)" 或 "X.XX%(-Y)"
 	// showPercentFirst=false: "+Y(+X.XX%)" 或 "-Y(X.XX%)"
 	static CString FormatProfitLoss(double percent, double amount, bool showPercentFirst = true);
-
-	// 日期格式化：YYYY-MM-DD
-	static CString FormatDate(int year, int month, int day);
-
-	// 日期字符串解析：从 "YYYY-MM-DD" 解析为 year/month/day，返回是否成功
-	static bool ParseDate(const CString& dateStr, int& year, int& month, int& day);
 
 	// 带正负号的数值格式化：正数带"+"前缀，负数不带额外符号
 	static CString FormatSignedValue(double value, const CString& format = _T("%.2f"));

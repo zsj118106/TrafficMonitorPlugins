@@ -162,26 +162,9 @@ namespace
 		return result > 0 ? result : 0.0;
 	}
 
-	double CalcATR(const std::vector<STOCK::Bar>& bars, size_t endIndex, int N = 14)
+	double CalcATRLocal(const std::vector<STOCK::Bar>& bars, size_t endIndex, int N = 14)
 	{
-		if (bars.empty() || endIndex >= bars.size() || N <= 0)
-			return 0.0;
-
-		size_t start = endIndex + 1 > static_cast<size_t>(N) ? endIndex + 1 - static_cast<size_t>(N) : 0;
-		double sum = 0.0;
-		size_t count = 0;
-		for (size_t i = start; i <= endIndex; i++)
-		{
-			double prevClose = i > 0 ? bars[i - 1].close : bars[i].close;
-			double tr = bars[i].high - bars[i].low;
-			double highGap = fabs(bars[i].high - prevClose);
-			double lowGap = fabs(bars[i].low - prevClose);
-			if (highGap > tr) tr = highGap;
-			if (lowGap > tr) tr = lowGap;
-			sum += tr;
-			count++;
-		}
-		return count > 0 ? sum / count : 0.0;
+		return CSignalAnalyzer::CalcATR(bars, endIndex, N);
 	}
 
 	// 信号价差阈值（多空拆分版）
@@ -194,7 +177,7 @@ namespace
 			return 0.0;
 
 		double priceThreshold = bars[endIndex].close > 0 ? bars[endIndex].close * MIN_SIGNAL_PRICE_RATIO : 0.0;
-		double atrThreshold = CalcATR(bars, endIndex) * MIN_SIGNAL_ATR_RATIO;
+		double atrThreshold = CalcATRLocal(bars, endIndex) * MIN_SIGNAL_ATR_RATIO;
 		double base = atrThreshold > priceThreshold ? atrThreshold : priceThreshold;
 
 		// 弱势放大买入价差：1.5倍，过滤小幅回调假买点
@@ -209,7 +192,7 @@ namespace
 			return 0.0;
 
 		double priceThreshold = bars[endIndex].close > 0 ? bars[endIndex].close * MIN_SIGNAL_PRICE_RATIO : 0.0;
-		double atrThreshold = CalcATR(bars, endIndex) * MIN_SIGNAL_ATR_RATIO;
+		double atrThreshold = CalcATRLocal(bars, endIndex) * MIN_SIGNAL_ATR_RATIO;
 		double base = atrThreshold > priceThreshold ? atrThreshold : priceThreshold;
 
 		// 强势缩小卖出价差：0.7倍，捕捉精准止盈点
@@ -345,18 +328,435 @@ namespace
 	}
 }
 
+// ========== 统一指标序列计算（消除重复逻辑） ==========
+
+void CSignalAnalyzer::CalcMACDSeriesFromCloses(const std::vector<double>& closes,
+	std::vector<double>& difSeq, std::vector<double>& deaSeq, std::vector<double>& barSeq,
+	int shortPeriod, int longPeriod, int signalPeriod)
+{
+	difSeq.clear(); deaSeq.clear(); barSeq.clear();
+	size_t n = closes.size();
+	if (n < 2 || shortPeriod <= 0 || longPeriod <= 0 || signalPeriod <= 0)
+	{
+		difSeq.resize(n, 0); deaSeq.resize(n, 0); barSeq.resize(n, 0);
+		return;
+	}
+
+	double kShort = 2.0 / (shortPeriod + 1.0);
+	double kLong = 2.0 / (longPeriod + 1.0);
+	std::vector<double> emaShort(n), emaLong(n);
+	emaShort[0] = closes[0];
+	emaLong[0] = closes[0];
+	for (size_t i = 1; i < n; i++)
+	{
+		emaShort[i] = closes[i] * kShort + emaShort[i - 1] * (1.0 - kShort);
+		emaLong[i] = closes[i] * kLong + emaLong[i - 1] * (1.0 - kLong);
+	}
+
+	difSeq.resize(n); deaSeq.resize(n); barSeq.resize(n);
+	for (size_t i = 0; i < n; i++)
+		difSeq[i] = emaShort[i] - emaLong[i];
+
+	double kSignal = 2.0 / (signalPeriod + 1.0);
+	deaSeq[0] = difSeq[0];
+	for (size_t i = 1; i < n; i++)
+		deaSeq[i] = difSeq[i] * kSignal + deaSeq[i - 1] * (1.0 - kSignal);
+
+	for (size_t i = 0; i < n; i++)
+		barSeq[i] = 2.0 * (difSeq[i] - deaSeq[i]);
+}
+
+void CSignalAnalyzer::CalcKDJSeriesFromHLC(const std::vector<double>& highs, const std::vector<double>& lows,
+	const std::vector<double>& closes, int N,
+	std::vector<double>& kSeq, std::vector<double>& dSeq, std::vector<double>& jSeq,
+	int m1, int m2)
+{
+	size_t n = closes.size();
+	kSeq.assign(n, 50.0);
+	dSeq.assign(n, 50.0);
+	jSeq.assign(n, 50.0);
+	if (N <= 0 || n < static_cast<size_t>(N) || highs.size() != n || lows.size() != n)
+		return;
+
+	double k = 50.0, d = 50.0;
+	double kAlpha = 1.0 / m1;
+	double kBeta = static_cast<double>(m1 - 1) / m1;
+	double dAlpha = 1.0 / m2;
+	double dBeta = static_cast<double>(m2 - 1) / m2;
+
+	for (size_t i = static_cast<size_t>(N) - 1; i < n; i++)
+	{
+		double highest = highs[i - static_cast<size_t>(N) + 1];
+		double lowest = lows[i - static_cast<size_t>(N) + 1];
+		for (size_t j = i - static_cast<size_t>(N) + 2; j <= i; j++)
+		{
+			if (highs[j] > highest) highest = highs[j];
+			if (lows[j] < lowest) lowest = lows[j];
+		}
+
+		if (highest > lowest && closes[i] > 0)
+		{
+			double rsv = (closes[i] - lowest) / (highest - lowest) * 100.0;
+			if (rsv < 0) rsv = 0;
+			if (rsv > 100) rsv = 100;
+			k = kBeta * k + kAlpha * rsv;
+			d = dBeta * d + dAlpha * k;
+		}
+		// highest==lowest或closes[i]<=0时保持上一状态
+
+		kSeq[i] = k;
+		dSeq[i] = d;
+		jSeq[i] = 3.0 * k - 2.0 * d;
+	}
+}
+
+std::vector<CSignalAnalyzer::WRPoint> CSignalAnalyzer::CalcWRSeriesFromHLC(const std::vector<double>& highs,
+	const std::vector<double>& lows, const std::vector<double>& closes,
+	int period1, int period2)
+{
+	std::vector<WRPoint> result;
+	size_t n = closes.size();
+	if (n == 0 || period1 <= 0 || period2 <= 0 || highs.size() != n || lows.size() != n)
+		return result;
+
+	result.reserve(n);
+	int maxPeriod = (std::max)(period1, period2);
+
+	for (size_t i = 0; i < n; i++)
+	{
+		WRPoint wr;
+		wr.wr1 = 0; wr.wr2 = 0; wr.valid = false;
+
+		// WR1（短期）
+		if (i >= static_cast<size_t>(period1) - 1)
+		{
+			double highest = highs[i - period1 + 1];
+			double lowest = lows[i - period1 + 1];
+			for (size_t j = i - period1 + 2; j <= i; j++)
+			{
+				if (highs[j] > highest) highest = highs[j];
+				if (lows[j] < lowest) lowest = lows[j];
+			}
+			if (highest > lowest && closes[i] > 0)
+			{
+				wr.wr1 = (highest - closes[i]) / (highest - lowest) * 100.0;
+				if (wr.wr1 < 0) wr.wr1 = 0;
+				if (wr.wr1 > 100) wr.wr1 = 100;
+			}
+			else if (highest == lowest && closes[i] > 0)
+			{
+				wr.wr1 = 0;
+			}
+		}
+
+		// WR2（长期）
+		if (i >= static_cast<size_t>(period2) - 1)
+		{
+			double highest = highs[i - period2 + 1];
+			double lowest = lows[i - period2 + 1];
+			for (size_t j = i - period2 + 2; j <= i; j++)
+			{
+				if (highs[j] > highest) highest = highs[j];
+				if (lows[j] < lowest) lowest = lows[j];
+			}
+			if (highest > lowest && closes[i] > 0)
+			{
+				wr.wr2 = (highest - closes[i]) / (highest - lowest) * 100.0;
+				if (wr.wr2 < 0) wr.wr2 = 0;
+				if (wr.wr2 > 100) wr.wr2 = 100;
+			}
+			else if (highest == lowest && closes[i] > 0)
+			{
+				wr.wr2 = 0;
+			}
+		}
+
+		wr.valid = (i >= static_cast<size_t>(maxPeriod) - 1);
+		result.push_back(wr);
+	}
+
+	return result;
+}
+
+std::vector<double> CSignalAnalyzer::CalcRSISeriesFromCloses(const std::vector<double>& closes, int period, bool useEma)
+{
+	size_t n = closes.size();
+	std::vector<double> rsiValues(n, 0);
+	if (n < 2 || period <= 1)
+		return rsiValues;
+
+	// 初始AU/AD：前period根的平均涨跌幅
+	double au = 0, ad = 0;
+	int count = 0;
+	for (int i = 1; i <= period && i < static_cast<int>(n); i++)
+	{
+		double delta = closes[i] - closes[i - 1];
+		if (delta > 0) au += delta;
+		else ad += (-delta);
+		count++;
+	}
+	if (count > 0) { au /= count; ad /= count; }
+
+	// 第period根的RSI
+	if (period < static_cast<int>(n))
+	{
+		if (au == 0 && ad == 0)
+			rsiValues[period] = 50.0;
+		else
+			rsiValues[period] = 100.0 - 100.0 / (1.0 + au / (ad > 0 ? ad : 1e-10));
+	}
+
+	if (useEma)
+	{
+		// EMA平滑
+		double k = 2.0 / (period + 1.0);
+		for (int i = period + 1; i < static_cast<int>(n); i++)
+		{
+			double delta = closes[i] - closes[i - 1];
+			double up = (delta > 0) ? delta : 0.0;
+			double dn = (delta < 0) ? (-delta) : 0.0;
+			au = up * k + au * (1.0 - k);
+			ad = dn * k + ad * (1.0 - k);
+			if (au == 0 && ad == 0)
+				rsiValues[i] = 50.0;
+			else
+				rsiValues[i] = 100.0 - 100.0 / (1.0 + au / (ad > 0 ? ad : 1e-10));
+		}
+	}
+	else
+	{
+		// SMA平滑
+		for (int i = period + 1; i < static_cast<int>(n); i++)
+		{
+			double delta = closes[i] - closes[i - 1];
+			double up = (delta > 0) ? delta : 0.0;
+			double dn = (delta < 0) ? (-delta) : 0.0;
+			au = (au * (period - 1) + up) / period;
+			ad = (ad * (period - 1) + dn) / period;
+			if (au == 0 && ad == 0)
+				rsiValues[i] = 50.0;
+			else
+				rsiValues[i] = 100.0 - 100.0 / (1.0 + au / (ad > 0 ? ad : 1e-10));
+		}
+	}
+
+	return rsiValues;
+}
+
+std::vector<CSignalAnalyzer::CrossSignal> CSignalAnalyzer::DetectCross(
+	const std::vector<double>& seq1, const std::vector<double>& seq2,
+	const std::vector<bool>& validFlags, int sameDirMinGap,
+	double lowThreshold, double highThreshold)
+{
+	size_t n = seq1.size();
+	std::vector<CrossSignal> signals(n, CrossSignal::None);
+	if (n < 2 || seq2.size() != n || validFlags.size() != n)
+		return signals;
+
+	const double epsilon = 1e-6;
+	int lastGoldenIdx = -sameDirMinGap;
+	int lastDeathIdx = -sameDirMinGap;
+
+	for (size_t i = 1; i < n; i++)
+	{
+		if (!validFlags[i] || !validFlags[i - 1])
+			continue;
+
+		// 粘合状态：差值过小不触发新叉
+		if (std::abs(seq1[i - 1] - seq2[i - 1]) < epsilon)
+			continue;
+
+		// 金叉：seq1从下往上穿过seq2（lowThreshold=-1e300时不限阈值）
+		if (seq1[i - 1] < seq2[i - 1] && seq1[i] > seq2[i] &&
+			(lowThreshold <= -1e290 || seq1[i - 1] <= lowThreshold))
+		{
+			if (static_cast<int>(i) - lastGoldenIdx >= sameDirMinGap)
+			{
+				signals[i] = CrossSignal::GoldenCross;
+				lastGoldenIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = CrossSignal::RepeatedGoldenCross;
+			}
+		}
+		// 死叉：seq1从上往下跌破seq2（highThreshold=1e300时不限阈值）
+		else if (seq1[i - 1] > seq2[i - 1] && seq1[i] < seq2[i] &&
+			(highThreshold >= 1e290 || seq1[i - 1] >= highThreshold))
+		{
+			if (static_cast<int>(i) - lastDeathIdx >= sameDirMinGap)
+			{
+				signals[i] = CrossSignal::DeathCross;
+				lastDeathIdx = static_cast<int>(i);
+			}
+			else
+			{
+				signals[i] = CrossSignal::RepeatedDeathCross;
+			}
+		}
+	}
+
+	return signals;
+}
+
+std::vector<CSignalAnalyzer::CrossSignal> CSignalAnalyzer::DetectMACDCross(
+	const std::vector<double>& difSeq, const std::vector<double>& deaSeq,
+	const std::vector<bool>& validFlags)
+{
+	// MACD交叉：无阈值限制（金叉/死叉不限DIF值范围）
+	return DetectCross(difSeq, deaSeq, validFlags, 5, -1e300, 1e300);
+}
+
+std::vector<CSignalAnalyzer::CrossSignal> CSignalAnalyzer::DetectKDJCross(
+	const std::vector<double>& kSeq, const std::vector<double>& dSeq,
+	const std::vector<bool>& validFlags)
+{
+	// KDJ交叉：金叉须K<=30，死叉须K>=70
+	return DetectCross(kSeq, dSeq, validFlags, 5, 30.0, 70.0);
+}
+
+RegResult CSignalAnalyzer::CalcLinearReg(const std::vector<double>& values, int lookback, bool autoScale)
+{
+	RegResult result;
+	result.valid = false;
+	result.slope = 0.0;
+	result.r2 = 0.0;
+
+	int n = static_cast<int>(values.size());
+	if (n < lookback || lookback < 3)
+		return result;
+
+	// 取最近lookback个值
+	std::deque<double> win;
+	for (int i = n - 1; i >= 0 && static_cast<int>(win.size()) < lookback; i--)
+		win.push_front(values[i]);
+	if (static_cast<int>(win.size()) < lookback)
+		return result;
+
+	// 自动放大：当值太小时放大为整数计算，避免浮点精度丢失
+	double scale = 1.0;
+	if (autoScale)
+	{
+		double maxAbs = 0;
+		for (double v : win)
+			maxAbs = (std::max)(maxAbs, std::abs(v));
+		if (maxAbs > 0 && maxAbs < 1.0)
+		{
+			scale = 1000.0 / maxAbs;
+			double pow10 = 1.0;
+			while (pow10 * 10 <= scale) pow10 *= 10;
+			while (pow10 / 10 > scale) pow10 /= 10;
+			scale = pow10;
+		}
+	}
+
+	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
+	int wn = static_cast<int>(win.size());
+	for (int i = 0; i < wn; i++)
+	{
+		double x = static_cast<double>(i);
+		double y = win[i] * scale;
+		Sx += x; Sy += y;
+		Sxx += x * x; Syy += y * y;
+		Sxy += x * y;
+	}
+
+	double dn = static_cast<double>(wn);
+	double denom = dn * Sxx - Sx * Sx;
+	if (denom == 0.0)
+		return result;
+
+	double numer = dn * Sxy - Sx * Sy;
+	result.slope = (numer / denom) / scale;
+
+	double SStotal = dn * Syy - Sy * Sy;
+	if (SStotal == 0.0)
+		result.r2 = 1.0;
+	else
+		result.r2 = 1.0 - (SStotal - numer * numer / denom) / SStotal;
+
+	result.valid = true;
+	return result;
+}
+
+RegResult CSignalAnalyzer::CalcLinearRegFromDeque(const std::deque<double>& win)
+{
+	RegResult result;
+	result.valid = false;
+	result.slope = 0.0;
+	result.r2 = 0.0;
+
+	int n = static_cast<int>(win.size());
+	if (n < 6)
+		return result;
+
+	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
+	for (int i = 0; i < n; i++)
+	{
+		double x = static_cast<double>(i);
+		double y = win[i];
+		Sx += x; Sy += y;
+		Sxx += x * x; Syy += y * y;
+		Sxy += x * y;
+	}
+
+	double dn = static_cast<double>(n);
+	double denom = dn * Sxx - Sx * Sx;
+	if (denom == 0.0)
+		return result;
+
+	double numer = dn * Sxy - Sx * Sy;
+	result.slope = numer / denom;
+
+	double SStotal = dn * Syy - Sy * Sy;
+	if (SStotal == 0.0)
+		result.r2 = 1.0;
+	else
+		result.r2 = 1.0 - (SStotal - numer * numer / denom) / SStotal;
+
+	result.valid = true;
+	return result;
+}
+
+double CSignalAnalyzer::CalcATR(const std::vector<STOCK::Bar>& bars, size_t endIndex, int N)
+{
+	if (bars.empty() || endIndex >= bars.size() || N <= 0)
+		return 0.0;
+
+	size_t start = endIndex + 1 > static_cast<size_t>(N) ? endIndex + 1 - static_cast<size_t>(N) : 0;
+	double sum = 0.0;
+	size_t count = 0;
+	for (size_t i = start; i <= endIndex; i++)
+	{
+		double prevClose = i > 0 ? bars[i - 1].close : bars[i].close;
+		double tr = bars[i].high - bars[i].low;
+		double highGap = fabs(bars[i].high - prevClose);
+		double lowGap = fabs(bars[i].low - prevClose);
+		if (highGap > tr) tr = highGap;
+		if (lowGap > tr) tr = lowGap;
+		sum += tr;
+		count++;
+	}
+	return count > 0 ? sum / count : 0.0;
+}
+
 // ========== 智能分析模块：基础工具函数 ==========
 
-double CSignalAnalyzer::CalcMA(const std::vector<double>& values, int N)
+double CSignalAnalyzer::CalcMA(const std::vector<double>& values, int N, bool requireFullWindow)
 {
 	if (values.empty() || N <= 0)
 		return 0.0;
-	if (static_cast<int>(values.size()) < N)
+	if (requireFullWindow && static_cast<int>(values.size()) < N)
 		return 0.0;
+	int startIdx = max(0, static_cast<int>(values.size()) - N);
 	double sum = 0.0;
-	for (int i = static_cast<int>(values.size()) - N; i < static_cast<int>(values.size()); i++)
+	int count = 0;
+	for (int i = startIdx; i < static_cast<int>(values.size()); i++)
+	{
 		sum += values[i];
-	double result = sum / N;
+		count++;
+	}
+	double result = count > 0 ? sum / count : 0.0;
 	return std::isfinite(result) ? result : 0.0;
 }
 
@@ -369,18 +769,6 @@ double CSignalAnalyzer::CalcEMA(const std::vector<double>& values, int N)
 	for (size_t i = 1; i < values.size(); i++)
 		ema = values[i] * k + ema * (1.0 - k);
 	return std::isfinite(ema) ? ema : 0.0;
-}
-
-double CSignalAnalyzer::CalcSMA(const std::vector<double>& values, int N, double M /* = 1.0 */)
-{
-	if (values.empty() || N <= 0)
-		return 0.0;
-	// SMA(X,N,M) = (M*X + (N-M)*Y') / N，Y'为上一周期SMA值
-	// 初始值取第一个值
-	double sma = values[0];
-	for (size_t i = 1; i < values.size(); i++)
-		sma = (M * values[i] + (N - M) * sma) / N;
-	return sma;
 }
 
 // ========== 全局指标参数配置 ==========
@@ -438,51 +826,43 @@ STOCK::MACDResult CSignalAnalyzer::CalcMACD(const std::vector<STOCK::Bar>& bars)
 	if (bars.size() < 26)
 		return result;
 
-	// 提取收盘价序列
 	std::vector<double> closes;
 	closes.reserve(bars.size());
 	for (const auto& bar : bars)
 		closes.push_back(bar.close);
 
-	// 计算EMA12和EMA26完整序列
-	double k12 = 2.0 / 13.0;
-	double k26 = 2.0 / 27.0;
-	std::vector<double> ema12(closes.size());
-	std::vector<double> ema26(closes.size());
-	ema12[0] = closes[0];
-	ema26[0] = closes[0];
-	for (size_t i = 1; i < closes.size(); i++)
-	{
-		ema12[i] = closes[i] * k12 + ema12[i - 1] * (1.0 - k12);
-		ema26[i] = closes[i] * k26 + ema26[i - 1] * (1.0 - k26);
-	}
+	std::vector<double> difSeq, deaSeq, barSeq;
+	CalcMACDSeriesFromCloses(closes, difSeq, deaSeq, barSeq);
+	if (difSeq.empty())
+		return result;
 
-	// DIF序列
-	std::vector<double> difSeq(closes.size());
-	for (size_t i = 0; i < closes.size(); i++)
-		difSeq[i] = ema12[i] - ema26[i];
-
-	// DEA：对DIF序列求EMA9
-	double k9 = 2.0 / 10.0;
-	std::vector<double> deaSeq(difSeq.size());
-	deaSeq[0] = difSeq[0];
-	for (size_t i = 1; i < difSeq.size(); i++)
-		deaSeq[i] = difSeq[i] * k9 + deaSeq[i - 1] * (1.0 - k9);
-
-	// 取最新值
-	size_t last = closes.size() - 1;
+	size_t last = difSeq.size() - 1;
 	result.dif = difSeq[last];
 	result.dea = deaSeq[last];
-	result.macd_bar = 2.0 * (difSeq[last] - deaSeq[last]);
+	result.macd_bar = barSeq[last];
 	return result;
 }
 
 STOCK::KDJResult CSignalAnalyzer::CalcKDJ(const std::vector<STOCK::Bar>& bars, int N /* = 9 */)
 {
 	STOCK::KDJResult result;
+	if (static_cast<int>(bars.size()) < N)
+		return result;
+
+	std::vector<double> highs, lows, closes;
+	highs.reserve(bars.size());
+	lows.reserve(bars.size());
+	closes.reserve(bars.size());
+	for (const auto& bar : bars)
+	{
+		highs.push_back(bar.high);
+		lows.push_back(bar.low);
+		closes.push_back(bar.close);
+	}
+
 	std::vector<double> kSeq, dSeq, jSeq;
-	CalcKDJSeries(bars, N, kSeq, dSeq, jSeq);
-	if (kSeq.empty() || static_cast<int>(bars.size()) < N)
+	CalcKDJSeriesFromHLC(highs, lows, closes, N, kSeq, dSeq, jSeq);
+	if (kSeq.empty())
 		return result;
 
 	result.k = kSeq.back();
@@ -496,43 +876,17 @@ double CSignalAnalyzer::CalcRSI(const std::vector<STOCK::Bar>& bars, int N)
 	if (static_cast<int>(bars.size()) < 2)
 		return 50.0;
 
-	// 计算涨跌序列
-	std::vector<double> upList, dnList;
-	for (size_t i = 1; i < bars.size(); i++)
-	{
-		double delta = bars[i].close - bars[i - 1].close;
-		upList.push_back(max(delta, 0.0));
-		dnList.push_back(max(-delta, 0.0));
-	}
+	std::vector<double> closes;
+	closes.reserve(bars.size());
+	for (const auto& bar : bars)
+		closes.push_back(bar.close);
 
-	if (static_cast<int>(upList.size()) < N)
+	auto rsiSeq = CalcRSISeriesFromCloses(closes, N, GetParam().rsiUseEma);
+	if (rsiSeq.empty())
 		return 50.0;
 
-	double au, ad;
-	if (GetParam().rsiUseEma)
-	{
-		// EMA平滑：与市面行情软件对齐，标准RSI计算方式
-		double k = 2.0 / (N + 1.0);
-		au = upList[0];
-		ad = dnList[0];
-		for (size_t i = 1; i < upList.size(); i++)
-		{
-			au = upList[i] * k + au * (1.0 - k);
-			ad = dnList[i] * k + ad * (1.0 - k);
-		}
-	}
-	else
-	{
-		// SMA平滑：保留原有计算方式，适配不同回测需求
-		au = CalcSMA(upList, N);
-		ad = CalcSMA(dnList, N);
-	}
-
-	if (ad == 0.0)
-		return 99.99;
-
-	double rs = au / ad;
-	return 100.0 - 100.0 / (1.0 + rs);
+	double val = rsiSeq.back();
+	return std::isfinite(val) ? val : 50.0;
 }
 
 double CSignalAnalyzer::CalcWR(const std::vector<STOCK::Bar>& bars, int N)
@@ -553,36 +907,6 @@ double CSignalAnalyzer::CalcWR(const std::vector<STOCK::Bar>& bars, int N)
 		return 50.0;
 
 	return 100.0 * (hhv - c) / (hhv - llv);
-}
-
-// 成交量加权WR：放量高低点权重更大，过滤长上影假极值
-// 计算方式：对窗口内每根K线的高低点按成交量加权，取加权最高价和加权最低价
-double CSignalAnalyzer::CalcWR_VolumeWeighted(const std::vector<STOCK::Bar>& bars, int N)
-{
-	if (static_cast<int>(bars.size()) < N || N <= 0)
-		return 50.0;
-
-	double volSum = 0;
-	double wHigh = 0, wLow = 0;
-	for (int i = static_cast<int>(bars.size()) - N; i < static_cast<int>(bars.size()); i++)
-	{
-		double v = bars[i].volume;
-		if (v <= 0) v = 1.0;  // 防止零成交量
-		volSum += v;
-		wHigh += bars[i].high * v;
-		wLow += bars[i].low * v;
-	}
-	if (volSum <= 0)
-		return 50.0;
-
-	wHigh /= volSum;
-	wLow /= volSum;
-
-	double c = bars.back().close;
-	if (wHigh == wLow)
-		return 50.0;
-
-	return 100.0 * (wHigh - c) / (wHigh - wLow);
 }
 
 // ========== 智能分析模块：30分钟趋势判定 ==========
@@ -700,48 +1024,6 @@ STOCK::TrendStateResult CSignalAnalyzer::Get30mTrendState(const std::vector<STOC
 	return result;
 }
 
-// ========== 趋势防抖 ==========
-// 连续3根K线同状态才确认切换，期间保持旧趋势（锁定冷却周期）
-// 解决连续交替震荡/强势仍会抖动的问题
-STOCK::TrendState30m CSignalAnalyzer::DebounceTrendState(
-	const std::vector<STOCK::TrendStateResult>& recentResults,
-	STOCK::TrendState30m currentState)
-{
-	if (recentResults.empty())
-		return currentState;
-
-	// 取最近1根K线的趋势状态
-	STOCK::TrendState30m latest = recentResults.back().state;
-
-	// 如果最新状态与当前锁定状态一致，直接返回
-	if (latest == currentState)
-		return currentState;
-
-	// 新状态与当前不同，检查是否连续3根都是同一新状态
-	size_t confirmCount = 3;
-	if (recentResults.size() < confirmCount)
-		return currentState;  // 数据不足，保持旧状态
-
-	// 从最新往前数，检查连续confirmCount根是否都是同一新状态
-	STOCK::TrendState30m candidate = latest;
-	bool allSame = true;
-	for (size_t k = 0; k < confirmCount; k++)
-	{
-		size_t idx = recentResults.size() - 1 - k;
-		if (recentResults[idx].state != candidate)
-		{
-			allSame = false;
-			break;
-		}
-	}
-
-	if (allSame)
-		return candidate;  // 连续3根同状态，确认切换
-
-	// 未达确认条件，保持旧状态（锁定冷却）
-	return currentState;
-}
-
 // ========== 双周期共振趋势判定模块 ==========
 
 namespace
@@ -772,7 +1054,7 @@ namespace
 		if (n >= 15)
 		{
 			std::vector<STOCK::Bar> barsForATR(bars.end() - 15, bars.end());
-			atr = CalcATR(barsForATR, barsForATR.size() - 1);
+			atr = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 		}
 		double minSwingSize = atr * SWING_MIN_ATR_RATIO;
 
@@ -903,7 +1185,7 @@ namespace
 		if (n >= 15)
 		{
 			std::vector<STOCK::Bar> barsForATR(bars.begin() + (n - 15), bars.begin() + n);
-			atr = CalcATR(barsForATR, barsForATR.size() - 1);
+			atr = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 		}
 		double minPriceDiff = atr * DIV_ATR_RATIO;
 		double minDifDiff = atr * DIV_ATR_RATIO * 0.5;  // DIF差值阈值略低
@@ -1397,20 +1679,6 @@ double CSignalAnalyzer::CalcOuterInnerRatio(STOCK::Volume outerVol, STOCK::Volum
 	return static_cast<double>(outerVol - innerVol) / total;
 }
 
-// ========== 回测模式控制 ==========
-void CSignalAnalyzer::SetBacktestMode(bool enabled)
-{
-	g_backtestMode = enabled;
-	CString msg;
-	msg.Format(_T("回测模式：%s"), enabled ? _T("开启") : _T("关闭"));
-	SignalLog(LogLevel::LOG_INFO, msg);
-}
-
-bool CSignalAnalyzer::IsBacktestMode()
-{
-	return g_backtestMode;
-}
-
 // ========== 跨周期时间对齐 ==========
 std::vector<size_t> CSignalAnalyzer::Align5mTo30m(const std::vector<STOCK::Bar>& bars5, const std::vector<STOCK::Bar>& bars30)
 {
@@ -1605,7 +1873,7 @@ STOCK::Signal5m CSignalAnalyzer::Get5mSignal(const std::vector<STOCK::Bar>& bars
 	// 必要条件组：价格触及轨道(B1) + MACD信号(B2) 至少满足1个
 	bool buyB1 = (last.low <= boll.dn) || (last.close < boll.dn);
 	// MACD：绿柱缩短 or 底背离（DIF远离0轴才认定有效动量信号）
-	double macdDifThreshold = GetMacdDifThreshold(last.close, CalcATR(bars5, lastIndex));
+	double macdDifThreshold = GetMacdDifThreshold(last.close, CalcATRLocal(bars5, lastIndex));
 	bool buyB2_greenShrink = (macd.macd_bar < 0) && (macd.macd_bar > prevMacd.macd_bar) && fabs(macd.dif) > macdDifThreshold;
 	// 底背离：弱背离不单独触发买入，标准/强背离可触发
 	bool buyB2_bottomDiv = divInfo.hasBottomDiv && (divInfo.bottomDivLevel >= DivLevel::STANDARD);
@@ -1734,7 +2002,7 @@ CSignalAnalyzer::ForbidResult CSignalAnalyzer::CalcForbidResult(const std::vecto
 	}
 	bool bandExpand = IsBollExpand(bollBandSeq, bars5.size() - 1);
 	double avgBollBandwidth = CalcAverageBollBandwidth(bollBandSeq, bars5.size() - 1);
-	double atr5 = CalcATR(bars5, bars5.size() - 1);
+	double atr5 = CalcATRLocal(bars5, bars5.size() - 1);
 	bool narrowBand = IsNarrowBoll(avgBollBandwidth, atr5);
 
 	// BOLL中轨方向：上涨时扩张禁止卖出，下跌时扩张禁止买入
@@ -1950,34 +2218,12 @@ CSignalAnalyzer::T0Signal CSignalAnalyzer::DetectSmartSignal(const std::vector<S
 // ========== 智能分析模块：MACD批量序列计算 ==========
 void CSignalAnalyzer::CalcMACDSeries(const std::vector<STOCK::Bar>& bars, std::vector<double>& difSeq, std::vector<double>& deaSeq, std::vector<double>& barSeq)
 {
-	difSeq.clear(); deaSeq.clear(); barSeq.clear();
-	size_t n = bars.size();
-	if (n < 2) { difSeq.resize(n, 0); deaSeq.resize(n, 0); barSeq.resize(n, 0); return; }
-
-	std::vector<double> ema12(n), ema26(n);
-		ema12[0] = SafeDouble(bars[0].close, "MACD ema12[0]");
-		ema26[0] = SafeDouble(bars[0].close, "MACD ema26[0]");
-		double k12 = 2.0 / 13.0;
-		double k26 = 2.0 / 27.0;
-		for (size_t i = 1; i < n; i++)
-		{
-			ema12[i] = SafeDouble(bars[i].close * k12 + ema12[i - 1] * (1.0 - k12), "MACD ema12");
-			ema26[i] = SafeDouble(bars[i].close * k26 + ema26[i - 1] * (1.0 - k26), "MACD ema26");
-		}
-
-		difSeq.resize(n); deaSeq.resize(n); barSeq.resize(n);
-		deaSeq[0] = difSeq[0];
-		for (size_t i = 0; i < n; i++)
-			difSeq[i] = SafeDouble(ema12[i] - ema26[i], "MACD dif");
-
-		double k9 = 2.0 / 10.0;
-		deaSeq[0] = difSeq[0];
-		for (size_t i = 1; i < n; i++)
-			deaSeq[i] = SafeDouble(difSeq[i] * k9 + deaSeq[i - 1] * (1.0 - k9), "MACD dea");
-
-		for (size_t i = 0; i < n; i++)
-			barSeq[i] = SafeDouble(2.0 * (difSeq[i] - deaSeq[i]), "MACD bar");
-	}
+	std::vector<double> closes;
+	closes.reserve(bars.size());
+	for (const auto& bar : bars)
+		closes.push_back(bar.close);
+	CalcMACDSeriesFromCloses(closes, difSeq, deaSeq, barSeq);
+}
 
 // ========== 智能分析模块：批量信号检测 ==========
 // 一次性计算全部指标序列，然后逐根判定信号
@@ -2121,7 +2367,7 @@ std::vector<CSignalAnalyzer::SmartSignalPoint> CSignalAnalyzer::BatchDetectSigna
 	for (size_t i = atrPeriod; i < n; i++)
 	{
 		std::vector<STOCK::Bar> barsForATR(bars5.begin() + i - atrPeriod, bars5.begin() + i + 1);
-		atrSeq[i] = CalcATR(barsForATR, barsForATR.size() - 1);
+		atrSeq[i] = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 	}
 
 	// 分趋势差异化辅助指标达标数量（动态计算，每根K线根据当期trendState确定）
@@ -2577,7 +2823,7 @@ std::vector<CSignalAnalyzer::SmartSignalPoint> CSignalAnalyzer::BatchDetectSigna
 	for (size_t i = atrPeriod; i < n; i++)
 	{
 		std::vector<STOCK::Bar> barsForATR(bars1m.begin() + i - atrPeriod, bars1m.begin() + i + 1);
-		atrSeq[i] = CalcATR(barsForATR, barsForATR.size() - 1);
+		atrSeq[i] = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 	}
 
 	// 4. 逐根1分钟Bar检测信号
@@ -2932,7 +3178,7 @@ CSignalAnalyzer::SignalAnalysisResult CSignalAnalyzer::AnalyzeSignalAt(
 	for (size_t i = atrPeriod; i < n; i++)
 	{
 		std::vector<STOCK::Bar> barsForATR(bars5.begin() + i - atrPeriod, bars5.begin() + i + 1);
-		result.atrSeq[i] = CalcATR(barsForATR, barsForATR.size() - 1);
+		result.atrSeq[i] = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 	}
 
 	// 均量序列
@@ -3244,7 +3490,7 @@ CSignalAnalyzer::SignalAnalysisResult CSignalAnalyzer::AnalyzeSignalAtFromTimeli
 	for (size_t i = atrPeriod; i < n; i++)
 	{
 		std::vector<STOCK::Bar> barsForATR(bars1m.begin() + i - atrPeriod, bars1m.begin() + i + 1);
-		result.atrSeq[i] = CalcATR(barsForATR, barsForATR.size() - 1);
+		result.atrSeq[i] = CalcATRLocal(barsForATR, barsForATR.size() - 1);
 	}
 
 	// 均量序列
@@ -3480,7 +3726,7 @@ CSignalAnalyzer::RealtimeSignal CSignalAnalyzer::CalcRealtimeSignals(const std::
 		{
 			size_t n = difSeq.size();
 			double difDeaDiff = fabs(difSeq[n - 1] - deaSeq[n - 1]);
-			double difThreshold = GetMacdDifThreshold(currentPrice, CalcATR(bars5, bars5.size() - 1));
+			double difThreshold = GetMacdDifThreshold(currentPrice, CalcATRLocal(bars5, bars5.size() - 1));
 			// 金叉：前一根DIF < DEA，当前DIF >= DEA
 			if (difSeq[n - 2] < deaSeq[n - 2] && difSeq[n - 1] >= deaSeq[n - 1])
 			{
@@ -3554,49 +3800,6 @@ CSignalAnalyzer::RealtimeSignal CSignalAnalyzer::CalcRealtimeSignals(const std::
 	return sig;
 }
 
-// ========== 实时指标信号检测（基于分时数据） ==========
-CSignalAnalyzer::RealtimeSignal CSignalAnalyzer::CalcRealtimeSignalsFromTimeline(const std::vector<STOCK::TimelinePoint>& timeline, int endIndex /* = -1 */)
-{
-	RealtimeSignal sig;
-	if (timeline.size() < 26)
-		return sig;
-
-	size_t lastIdx = (endIndex >= 0 && static_cast<size_t>(endIndex) < timeline.size()) ? static_cast<size_t>(endIndex) : timeline.size() - 1;
-	if (lastIdx < 25)
-		return sig;
-
-	// 滚动聚合：每6根分时点合成一根标准5min Bar，真实计算OHLC与成交量
-	// 分时点通常是1分钟采样，6根≈5分钟（含首尾）
-	constexpr size_t AGG_SIZE = 6;
-	std::vector<STOCK::Bar> bars;
-	bars.reserve(lastIdx / AGG_SIZE + 1);
-
-	for (size_t i = 0; i <= lastIdx; )
-	{
-		size_t batchEnd = i + AGG_SIZE;
-		if (batchEnd > lastIdx + 1) batchEnd = lastIdx + 1;
-
-		double o = timeline[i].price;
-		double h = timeline[i].price;
-		double l = timeline[i].price;
-		double c = timeline[batchEnd - 1].price;
-		double v = 0;
-		for (size_t j = i; j < batchEnd; j++)
-		{
-			if (timeline[j].price > h) h = timeline[j].price;
-			if (timeline[j].price < l) l = timeline[j].price;
-			v += timeline[j].volume;
-		}
-		bars.push_back(STOCK::Bar(o, h, l, c, v, 0));
-		i = batchEnd;
-	}
-
-	if (bars.size() < 26)
-		return sig;
-
-	// 直接复用已有的Bar版计算函数
-	return CalcRealtimeSignals(bars, static_cast<int>(bars.size() - 1));
-}
 
 // ========== 多周期MACD趋势判定（日线→30min→5min→1min联动） ==========
 

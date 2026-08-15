@@ -9,6 +9,14 @@
 #include <limits>
 #include <ctime>
 
+// 线性回归结果（基础数据结构，供CSignalAnalyzer/CDataManager等使用）
+struct RegResult
+{
+	bool valid;    // true=数据足够，结果可信
+	double slope;  // 回归斜率k
+	double r2;     // 拟合优度R²
+};
+
 namespace STOCK
 {
 	// 价格
@@ -273,25 +281,6 @@ namespace STOCK
 		double CalculateMAPeriod(int days, int totalDays) const;
 		// 计算N日平均振幅
 		double CalculateAverageAmplitude(int days) const;
-		// 获取最近N天的最高价
-		double GetMaxPrice(int days) const;
-		// 获取最近N天的最低价
-		double GetMinPrice(int days) const;
-		// 获取最近N天的平均收盘价
-		double GetAverageClosePrice(int days) const;
-
-		// 周期高低点统计
-		struct PeriodStats {
-			double maxPrice;
-			double minPrice;
-			std::string maxDate;
-			std::string minDate;
-			double avgPrice;
-			bool isValid;
-
-			PeriodStats() : maxPrice(0), minPrice(0), avgPrice(0), isValid(false) {}
-		};
-		PeriodStats GetPeriodStats(int days) const;
 	};
 
 	// 5分钟K线历史数据（继承自KLineData，复用CalculateMA等方法）
@@ -672,8 +661,6 @@ namespace STOCK
 		{
 			return MakesureHistoricalData<Min30KLineData>(Period::MIN30).get();
 		}
-
-		std::wstring GetCurrentDisplay(bool include_name) const;
 
 		// 买一/卖一等于现价的累计计时（持久保存，窗口关闭不清零）
 		int ask1EqualSec{ 0 };       // 卖一等于现价的累计秒数

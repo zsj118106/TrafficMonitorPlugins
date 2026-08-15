@@ -64,27 +64,77 @@ public:
 
 	// 所有函数都是 static，纯计算无状态
 
+	// ========== 统一指标序列计算（从原始价格序列，消除重复逻辑） ==========
+
+	// MACD序列：从收盘价序列计算完整DIF/DEA/BAR序列
+	// 替代原CStockIndicator::CalculateTimelineMACD/CalculateKLineMACD中的重复EMA递推
+	static void CalcMACDSeriesFromCloses(const std::vector<double>& closes,
+		std::vector<double>& difSeq, std::vector<double>& deaSeq, std::vector<double>& barSeq,
+		int shortPeriod = 12, int longPeriod = 26, int signalPeriod = 9);
+
+	// KDJ序列：从高低收序列计算完整K/D/J序列
+	// 替代原CStockIndicator::CalculateKDJ/CalculateTimelineKDJ中的重复RSV递推
+	static void CalcKDJSeriesFromHLC(const std::vector<double>& highs, const std::vector<double>& lows,
+		const std::vector<double>& closes, int N,
+		std::vector<double>& kSeq, std::vector<double>& dSeq, std::vector<double>& jSeq,
+		int m1 = 3, int m2 = 3);
+
+	// WR序列：从高低收序列计算双周期WR序列
+	// 替代原CStockIndicator::CalculateTimelineWR/CalculateKLineWR中的重复HHV/LLV计算
+	struct WRPoint { double wr1; double wr2; bool valid; };
+	static std::vector<WRPoint> CalcWRSeriesFromHLC(const std::vector<double>& highs,
+		const std::vector<double>& lows, const std::vector<double>& closes,
+		int period1 = 6, int period2 = 14);
+
+	// RSI序列：从收盘价序列计算指定周期RSI序列
+	// 替代原CStockIndicator::CalculateTimelineRSI/CalculateKLineRSI中的重复AU/AD递推
+	// useEma: true=EMA平滑（默认），false=SMA平滑
+	static std::vector<double> CalcRSISeriesFromCloses(const std::vector<double>& closes,
+		int period, bool useEma = true);
+
+	// 通用交叉检测：检测seq1上穿/下穿seq2
+	// 替代原CStockIndicator::DetectMACDCross/DetectKDJCross中的重复交叉逻辑
+	// lowThreshold: 金叉时seq1前值须<=此阈值（KDJ用30，MACD用-DBL_MAX即不限）
+	// highThreshold: 死叉时seq1前值须>=此阈值（KDJ用70，MACD用DBL_MAX即不限）
+	enum class CrossSignal {
+		None, GoldenCross, DeathCross, RepeatedGoldenCross, RepeatedDeathCross
+	};
+	static std::vector<CrossSignal> DetectCross(const std::vector<double>& seq1,
+		const std::vector<double>& seq2, const std::vector<bool>& validFlags,
+		int sameDirMinGap = 5, double lowThreshold = -1e300, double highThreshold = 1e300);
+	// 便捷版：从MACDData向量检测交叉（兼容旧调用）
+	static std::vector<CrossSignal> DetectMACDCross(const std::vector<double>& difSeq,
+		const std::vector<double>& deaSeq, const std::vector<bool>& validFlags);
+	// 便捷版：从KDJ序列检测交叉（K上穿D且K<=30为金叉，K下穿D且K>=70为死叉）
+	static std::vector<CrossSignal> DetectKDJCross(const std::vector<double>& kSeq,
+		const std::vector<double>& dSeq, const std::vector<bool>& validFlags);
+
+	// 线性回归：对最近lookback个值计算斜率和R2
+	// 替代原CStockIndicator::CalcDIFTrend/CalcKDJTrend及DataManager::CalcLinearReg中的重复回归
+	// autoScale: 当值太小时自动放大（DIF趋势需要，KDJ不需要）
+	static RegResult CalcLinearReg(const std::vector<double>& values, int lookback, bool autoScale = false);
+	// 便捷版：从deque计算（兼容DataManager调用）
+	static RegResult CalcLinearRegFromDeque(const std::deque<double>& win);
+
+	// ATR：从Bar序列计算指定位置的ATR（提升为public，替代匿名命名空间版本）
+	static double CalcATR(const std::vector<STOCK::Bar>& bars, size_t endIndex, int N = 14);
+
 	// ========== 基础工具函数 ==========
-	static double CalcMA(const std::vector<double>& values, int N);
+	static double CalcMA(const std::vector<double>& values, int N, bool requireFullWindow = true);
 	static double CalcEMA(const std::vector<double>& values, int N);
 	static void CalcMACDSeries(const std::vector<STOCK::Bar>& bars, std::vector<double>& difSeq, std::vector<double>& deaSeq, std::vector<double>& barSeq);
-	static double CalcSMA(const std::vector<double>& values, int N, double M = 1.0);
 	static double CalcStdDev(const std::vector<double>& values);
 
-	// ========== 5个核心指标计算函数 ==========
+	// ========== 5个核心指标计算函数（单值版，内部调用序列版取末值） ==========
 	static STOCK::BollResult CalcBoll(const std::vector<STOCK::Bar>& bars, int N = 20);
 	static STOCK::MACDResult CalcMACD(const std::vector<STOCK::Bar>& bars);
 	static STOCK::KDJResult CalcKDJ(const std::vector<STOCK::Bar>& bars, int N = 9);
 	static double CalcRSI(const std::vector<STOCK::Bar>& bars, int N);
 	static double CalcWR(const std::vector<STOCK::Bar>& bars, int N);
-	static double CalcWR_VolumeWeighted(const std::vector<STOCK::Bar>& bars, int N);
 
 	// ========== 30分钟趋势判定 ==========
 	// 返回 TrendStateResult：含趋势状态、置信度、加权得分
 	static STOCK::TrendStateResult Get30mTrendState(const std::vector<STOCK::Bar>& bars30);
-	// 趋势防抖：缓存最近N根K线的趋势状态，连续2根同状态才正式切换
-	static STOCK::TrendState30m DebounceTrendState(const std::vector<STOCK::TrendStateResult>& recentResults, STOCK::TrendState30m currentState);
-
 	// ========== 双周期共振趋势判定（5分钟+30分钟K线） ==========
 	// 30分钟波段结构判定
 	static bool Calc30UpStruct(const std::vector<STOCK::Bar>& bars30);
@@ -104,12 +154,6 @@ public:
 	// 返回：vector<size_t>，长度=bars5.size()，每个元素为对应30min Bar在bars30中的索引
 	// 若某根5min Bar无法匹配，对应值为SIZE_MAX
 	static std::vector<size_t> Align5mTo30m(const std::vector<STOCK::Bar>& bars5, const std::vector<STOCK::Bar>& bars30);
-
-	// ========== 回测模式控制 ==========
-	// 实盘模式：禁用未来函数逻辑（右侧确认、历史分位等）
-	// 回测模式：允许使用完整历史数据
-	static void SetBacktestMode(bool enabled);
-	static bool IsBacktestMode();
 
 	// ========== 5分钟共振买卖判定 ==========
 	static STOCK::Signal5m Get5mSignal(const std::vector<STOCK::Bar>& bars5, STOCK::TrendState30m trendState);
@@ -207,7 +251,6 @@ public:
 		RealtimeSignal() : boll(0), bollStr(0), macd(0), macdStr(0), rsi(0), rsiStr(0), kdj(0), kdjStr(0), wr(0), wrStr(0) {}
 	};
 	static RealtimeSignal CalcRealtimeSignals(const std::vector<STOCK::Bar>& bars5, int endIndex = -1);
-	static RealtimeSignal CalcRealtimeSignalsFromTimeline(const std::vector<STOCK::TimelinePoint>& timeline, int endIndex = -1);
 
 	// ========== 多周期MACD趋势判定（日线→30min→5min→1min联动） ==========
 

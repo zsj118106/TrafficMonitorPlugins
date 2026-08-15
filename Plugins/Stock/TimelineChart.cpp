@@ -79,35 +79,6 @@ static void DrawPricePointLabel(CDC& memDC, int pointX, int pointY, int chartLef
 	}
 }
 
-CPoint CTimelineChart::Stock2Point(int x, int y, int w, int h, double unitY, const STOCK::TimelinePoint& item, const STOCK::Price prevClosePrice)
-{
-	CPoint p = CPoint();
-	std::vector<std::string> time_arr = CCommon::split(item.time, ":");
-	if (time_arr.size() == 3)
-	{
-		static int before12ClockOffset = 570;
-		static int after12ClockOffset = 660;
-		static float totalMinutes = 240.0;
-
-		int hour = _ttoi(CString(time_arr[0].c_str()));
-		int minute = _ttoi(CString(time_arr[1].c_str()));
-
-		int countX = hour * 60 + minute;
-
-		if (hour < 12)
-		{
-			countX -= before12ClockOffset;
-		}
-		else if (hour >= 13)
-		{
-			countX -= after12ClockOffset;
-		}
-		p.x = w / totalMinutes * countX;
-	}
-	p.y = (item.price - prevClosePrice) * unitY * 100;
-	return p;
-}
-
 void CTimelineChart::DrawTimelineHeader(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover)
 {
 	CPoint origOrg = memDC.GetViewportOrg();
@@ -123,42 +94,89 @@ void CTimelineChart::DrawTimelineHeader(CDC& memDC, const TimelineDrawContext& c
 	memDC.SetViewportOrg(origOrg);
 }
 
-void CTimelineChart::DrawTimelineMAIndicators(CDC& memDC, const TimelineDrawContext& ctx)
+void CTimelineChart::DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx, UIViewMode viewMode)
 {
-	int maY = g_data.RDPI(26) + g_data.RDPI(2);
-	if (ctx.realtimeData.currentPrice <= 0)
-		return;
-
-	CString highTxt;
-	COLORREF highColor = (ctx.realtimeData.highPrice >= ctx.realtimeData.prevClosePrice) ? COLOR_RED_UP : COLOR_GREEN_DOWN;
-	highTxt.Format(_T("最高:%s "), CCommon::FormatFloat(ctx.realtimeData.highPrice));
-
-	CString lowTxt;
-	COLORREF lowColor = (ctx.realtimeData.lowPrice >= ctx.realtimeData.prevClosePrice) ? COLOR_RED_UP : COLOR_GREEN_DOWN;
-	lowTxt.Format(_T("最低:%s"), CCommon::FormatFloat(ctx.realtimeData.lowPrice));
-
-	int totalWidth = memDC.GetTextExtent(highTxt).cx + memDC.GetTextExtent(lowTxt).cx;
-	int startX = (ctx.chartWidth - totalWidth) / 2;
-	startX = max(g_data.RDPI(5), startX);
-
-	memDC.SetTextColor(highColor);
-	memDC.TextOut(startX, maY, highTxt);
-	startX += memDC.GetTextExtent(highTxt).cx;
-
-	memDC.SetTextColor(lowColor);
-	memDC.TextOut(startX, maY, lowTxt);
+	DrawTimelineBackgroundHighlightsForArea(memDC, ctx, ctx.priceChartTop, ctx.priceChartHeight, viewMode);
 }
 
-void CTimelineChart::DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx)
+void CTimelineChart::DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight, UIViewMode viewMode)
 {
-	if (!ctx.timelinePoint || ctx.timelinePoint->size() < 240)
+	// 仅分时模式（1分钟数据）绘制5分钟交替高亮，5分钟/30分钟/日K线模式不绘制
+	if (viewMode != UI_VIEW_TIMELINE)
 		return;
-	CBrush blueBrush(COLOR_LIGHT_BLUE);
-	memDC.FillRect(CRect(ctx.chartWidth * 0 / 240, ctx.priceChartTop, ctx.chartWidth * 30 / 240, ctx.priceChartTop + ctx.priceChartHeight), &blueBrush);
-	memDC.FillRect(CRect(ctx.chartWidth * 140 / 240, ctx.priceChartTop, ctx.chartWidth * 150 / 240, ctx.priceChartTop + ctx.priceChartHeight), &blueBrush);
 
-	CBrush greenBrush(COLOR_LIGHT_GREEN);
-	memDC.FillRect(CRect(ctx.chartWidth * 210 / 240, ctx.priceChartTop, ctx.chartWidth * 225 / 240, ctx.priceChartTop + ctx.priceChartHeight), &greenBrush);
+	if (!ctx.timelinePoint || ctx.timelinePoint->empty())
+		return;
+
+	const auto& timelinePoint = *ctx.timelinePoint;
+	const int totalPts = static_cast<int>(timelinePoint.size());
+	const int xAxisPts = ctx.xAxisPoints > 0 ? ctx.xAxisPoints : totalPts;
+
+	CBrush blueBrush(COLOR_LIGHT_BLUE);
+
+	// 从9:30开盘起，每5分钟交替高亮：9:30-9:35高亮，9:35-9:40不高亮，9:40-9:45高亮...
+	// A股交易时间：9:30-11:30(0~119分钟), 13:00-15:00(120~239分钟)
+	for (int i = 0; i < totalPts; i++)
+	{
+		// 解析时间字符串 "HH:MM" 计算交易分钟序号
+		const std::string& timeStr = timelinePoint[i].time;
+		int hour = 0, minute = 0;
+		if (timeStr.length() >= 5 && timeStr[2] == ':')
+		{
+			hour = (timeStr[0] - '0') * 10 + (timeStr[1] - '0');
+			minute = (timeStr[3] - '0') * 10 + (timeStr[4] - '0');
+		}
+		else
+			continue;
+
+		int totalMinutes = hour * 60 + minute;
+		// 计算从9:30开始的交易分钟序号
+		int tradingMin = -1;
+		if (totalMinutes >= 9 * 60 + 30 && totalMinutes <= 11 * 60 + 30)
+			tradingMin = totalMinutes - (9 * 60 + 30);
+		else if (totalMinutes >= 13 * 60 && totalMinutes <= 15 * 60)
+			tradingMin = 120 + (totalMinutes - 13 * 60);
+
+		if (tradingMin < 0)
+			continue;
+
+		// 每10分钟一个周期，前5分钟高亮，后5分钟不高亮
+		int cyclePos = tradingMin % 10;
+		if (cyclePos >= 5)
+			continue;
+
+		// 找到连续高亮区间的起点和终点
+		int startIdx = i;
+		while (i + 1 < totalPts)
+		{
+			const std::string& nextTimeStr = timelinePoint[i + 1].time;
+			int nextHour = 0, nextMinute = 0;
+			if (nextTimeStr.length() >= 5 && nextTimeStr[2] == ':')
+			{
+				nextHour = (nextTimeStr[0] - '0') * 10 + (nextTimeStr[1] - '0');
+				nextMinute = (nextTimeStr[3] - '0') * 10 + (nextTimeStr[4] - '0');
+			}
+			else
+				break;
+
+			int nextTotalMin = nextHour * 60 + nextMinute;
+			int nextTradingMin = -1;
+			if (nextTotalMin >= 9 * 60 + 30 && nextTotalMin <= 11 * 60 + 30)
+				nextTradingMin = nextTotalMin - (9 * 60 + 30);
+			else if (nextTotalMin >= 13 * 60 && nextTotalMin <= 15 * 60)
+				nextTradingMin = 120 + (nextTotalMin - 13 * 60);
+
+			if (nextTradingMin < 0 || nextTradingMin % 10 >= 5)
+				break;
+			i++;
+		}
+		int endIdx = i;
+
+		int xLeft = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * startIdx);
+		int xRight = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * (endIdx + 1));
+
+		memDC.FillRect(CRect(xLeft, chartTop, xRight, chartTop + chartHeight), &blueBrush);
+	}
 }
 
 void CTimelineChart::DrawTimelineGridLines(CDC& memDC, const TimelineDrawContext& ctx)
@@ -169,7 +187,7 @@ void CTimelineChart::DrawTimelineGridLines(CDC& memDC, const TimelineDrawContext
 	if (ctx.timelinePoint && !ctx.timelinePoint->empty())
 	{
 		const int totalPts = static_cast<int>(ctx.timelinePoint->size());
-		const int numVLines = 4;
+		const int numVLines = 6;
 		for (int i = 0; i <= numVLines; i++)
 		{
 			int idx = totalPts * i / numVLines;
@@ -289,7 +307,7 @@ void CTimelineChart::DrawTimelineCostAndProfitLines(CDC& memDC, const TimelineDr
 
 void CTimelineChart::DrawTimelineGridAndLines(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover)
 {
-	DrawTimelineBackgroundHighlights(memDC, ctx);
+	DrawTimelineBackgroundHighlights(memDC, ctx, hover.viewMode);
 	DrawTimelineGridLines(memDC, ctx);
 	DrawTimelinePriceLabels(memDC, ctx);
 	DrawTimelineCostAndProfitLines(memDC, ctx, hover);
@@ -949,6 +967,11 @@ void CTimelineChart::DrawTimelineHoverOverlay(CDC& memDC, const TimelineDrawCont
 		timeStr = CString(item.fullTime.c_str());
 		if (timeStr.GetLength() >= 16)
 			timeStr = timeStr.Left(16);
+	}
+	else if (!item.fullTime.empty() && hover.viewMode == UI_VIEW_DAY_KLINE)
+	{
+		// 日K线模式：悬停高亮显示完整日期 yyyy-mm-dd
+		timeStr = CString(item.fullTime.c_str());
 	}
 	else
 	{
@@ -1611,142 +1634,7 @@ void CTimelineChart::DrawDayKLinePriceChart(CDC& memDC, const TimelineDrawContex
 	}
 }
 
-void CTimelineChart::DrawTimelineVolumeSection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover)
-{
-	CIndicatorChart indicatorChart;
-	indicatorChart.DrawVolumeChart(memDC, 0, ctx.volumeChartTop, ctx.chartWidth, ctx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
-
-	if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
-	{
-		const auto& fullData = *ctx.fullTimeline;
-		const auto& visibleData = *ctx.timelinePoint;
-		const int totalPoints = static_cast<int>(visibleData.size());
-		const int fullCount = static_cast<int>(fullData.size());
-		const int startIndex = ctx.startIndex;
-		int endIndex = min(fullCount, startIndex + totalPoints);
-
-		STOCK::Volume maxVolume = 0;
-		for (int i = startIndex; i < endIndex; i++)
-		{
-			maxVolume = max(maxVolume, fullData[i].volume);
-		}
-
-		auto calcVolumeMA = [&](int globalIndex, int period) -> double {
-			if (globalIndex < period - 1)
-				return 0.0;
-
-			double sum = 0.0;
-			for (int i = globalIndex - period + 1; i <= globalIndex; i++)
-				sum += static_cast<double>(fullData[i].volume);
-			return sum / period;
-			};
-
-		std::vector<double> ma5(totalPoints, 0.0);
-		std::vector<double> ma10(totalPoints, 0.0);
-		for (int i = 0; i < totalPoints; i++)
-		{
-			int globalIndex = startIndex + i;
-			if (globalIndex >= 0 && globalIndex < fullCount)
-			{
-				ma5[i] = calcVolumeMA(globalIndex, 5);
-				ma10[i] = calcVolumeMA(globalIndex, 10);
-			}
-		}
-
-		if (maxVolume > 0)
-		{
-			auto volumeToY = [&](double volume) -> int {
-				int py = ctx.volumeChartTop + ctx.volumeChartHeight - static_cast<int>(volume / static_cast<double>(maxVolume) * ctx.volumeChartHeight);
-				return max(ctx.volumeChartTop, min(py, ctx.volumeChartTop + ctx.volumeChartHeight));
-				};
-
-			auto drawVolumeMALine = [&](const std::vector<double>& values, COLORREF color) {
-				CPen pen(PS_SOLID, 1, color);
-				CPen* pOldPen = memDC.SelectObject(&pen);
-				bool first = true;
-				for (int i = 0; i < totalPoints; i++)
-				{
-					if (values[i] <= 0)
-					{
-						first = true;
-						continue;
-					}
-
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) * i) + static_cast<int>(ctx.chartWidth / static_cast<float>(totalPoints) / 2);
-					int pointY = volumeToY(values[i]);
-					if (first)
-					{
-						memDC.MoveTo(pointX, pointY);
-						first = false;
-					}
-					else
-					{
-						memDC.LineTo(pointX, pointY);
-					}
-				}
-				memDC.SelectObject(pOldPen);
-				};
-
-			drawVolumeMALine(ma5, RGB(0, 0, 230));
-			drawVolumeMALine(ma10, RGB(0, 166, 235));
-		}
-	}
-
-	// 时间竖线和平均值参考线
-	CPen pGrid(PS_SOLID, 1, COLOR_GRAY_GRID);
-	CPen* pOldVolPen = memDC.SelectObject(&pGrid);
-
-	int volumeY = ctx.volumeChartTop;
-	memDC.MoveTo(0, volumeY);
-	memDC.LineTo(ctx.chartWidth, volumeY);
-
-	const auto& timelinePoint = *ctx.timelinePoint;
-	if (!timelinePoint.empty())
-	{
-		STOCK::Volume maxVolume = 0;
-		for (const auto& item : timelinePoint)
-		{
-			if (item.volume > maxVolume)
-				maxVolume = item.volume;
-		}
-		if (maxVolume > 0)
-		{
-			CPen dotPen(PS_DOT, 1, COLOR_GRAY_MIDDLE);
-			memDC.SelectObject(&dotPen);
-			memDC.SetTextColor(COLOR_GRAY_TEXT);
-			int volumeY = ctx.volumeChartTop;
-			int yAxisWidth = g_data.RDPI(50);
-			for (int i = 1; i <= 2; i++)
-			{
-				int yPos = volumeY + ctx.volumeChartHeight * i / 3;
-				memDC.MoveTo(0, yPos);
-				memDC.LineTo(ctx.chartWidth, yPos);
-
-				STOCK::Volume volAtLine = maxVolume * (3 - i) / 3;
-				STOCK::Volume volInLots = volAtLine / 100;
-				CString volLabel = CCommon::FormatVolumeInt(volInLots);
-				CSize labelSize = memDC.GetTextExtent(volLabel);
-				memDC.TextOut(-labelSize.cx - g_data.RDPI(3), yPos - labelSize.cy / 2, volLabel);
-			}
-			memDC.SelectObject(&pGrid);
-		}
-	}
-
-	if (ctx.timelinePoint && !ctx.timelinePoint->empty())
-	{
-		const int totalPts = static_cast<int>(ctx.timelinePoint->size());
-		const int numVLines = 4;
-		for (int i = 0; i <= numVLines; i++)
-		{
-			int xPos = ctx.chartWidth * i / numVLines;
-			memDC.MoveTo(xPos, volumeY);
-			memDC.LineTo(xPos, volumeY + ctx.volumeChartHeight);
-		}
-	}
-	memDC.SelectObject(pOldVolPen);
-}
-
-void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, const HoverState& hover)
+void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& ctx, int areaTop, int areaHeight, HoverState& hover)
 {
 	const auto& timelinePoint = *ctx.timelinePoint;
 	int titleH = g_data.RDPI(16);
@@ -1867,9 +1755,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			memDC.SetTextColor(premColor);
 			CSize premVs = memDC.GetTextExtent(premVal);
 			memDC.TextOut(xPos, centerY - premVs.cy / 2, premVal);
-			xPos += premVs.cx + g_data.RDPI(4);
-
-			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
+			xPos += premVs.cx + g_data.RDPI(4);			
 		}
 		else
 		{
@@ -1943,103 +1829,54 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			memDC.SetTextColor(premColor);
 			CSize premVs = memDC.GetTextExtent(premVal);
 			memDC.TextOut(xPos, centerY - premVs.cy / 2, premVal);
-			xPos += premVs.cx + g_data.RDPI(4);
-
-			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
+			xPos += premVs.cx + g_data.RDPI(4);			
 		}
 		else
 		{
 			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
 		}
 
-		// 分时模式：在标题栏正中间显示实时指标信号指示器
+		// 分时模式：使用5分钟K线数据计算实时指标信号，设置按钮信号颜色
+		// 注：分时数据仅当天约240点，聚合后仅约40根Bar，指标无法有效触发超买超卖信号
+		// 因此复用5分钟K线数据（多日数百根Bar），与5分钟K线模式信号一致
 		{
-			const auto& fullData = ctx.fullTimeline ? *ctx.fullTimeline : timelinePoint;
-			if (fullData.size() >= 26)
+			auto stockData = g_data.GetStockData(hover.stockId);
+			if (stockData)
 			{
-				int signalEndIndex = -1;
-				if (isHovering)
+				auto min5KLineObj = stockData->getMin5KLineData();
+				if (min5KLineObj && min5KLineObj->data.size() >= 26)
 				{
-					int hoverGlobalIdx = ctx.startIndex + hover.hoveredBarIndex;
-					if (hoverGlobalIdx >= 25 && hoverGlobalIdx < static_cast<int>(fullData.size()))
-						signalEndIndex = hoverGlobalIdx;
-				}
+					std::vector<STOCK::Bar> bars5;
+					bars5.reserve(min5KLineObj->data.size());
+					for (const auto& kp : min5KLineObj->data) bars5.push_back(STOCK::Bar::FromKLinePoint(kp));
 
-				auto rtSig = CSignalAnalyzer::CalcRealtimeSignalsFromTimeline(fullData, signalEndIndex);
-
-				static const COLORREF BUY_COLORS[] = {
-					RGB(40, 240, 40),
-					RGB(50, 180, 50),
-					RGB(20, 130, 40)
-				};
-				static const COLORREF SELL_COLORS[] = {
-					RGB(240, 40, 40),
-					RGB(180, 50, 50),
-					RGB(130, 20, 40)
-				};
-
-				std::vector<std::pair<CString, COLORREF>> sigItems;
-				if (rtSig.macd != 0) sigItems.push_back({ rtSig.macd == -1 ? _T("M\u2193") : _T("M\u2191"), rtSig.macd == -1 ? BUY_COLORS[rtSig.macdStr - 1] : SELL_COLORS[rtSig.macdStr - 1] });
-				if (rtSig.boll != 0) sigItems.push_back({ rtSig.boll == -1 ? _T("B\u2193") : _T("B\u2191"), rtSig.boll == -1 ? BUY_COLORS[rtSig.bollStr - 1] : SELL_COLORS[rtSig.bollStr - 1] });
-				if (rtSig.kdj != 0) sigItems.push_back({ rtSig.kdj == -1 ? _T("K\u2193") : _T("K\u2191"), rtSig.kdj == -1 ? BUY_COLORS[rtSig.kdjStr - 1] : SELL_COLORS[rtSig.kdjStr - 1] });
-				if (rtSig.rsi != 0) sigItems.push_back({ rtSig.rsi == -1 ? _T("R\u2193") : _T("R\u2191"), rtSig.rsi == -1 ? BUY_COLORS[rtSig.rsiStr - 1] : SELL_COLORS[rtSig.rsiStr - 1] });
-				if (rtSig.wr != 0) sigItems.push_back({ rtSig.wr == -1 ? _T("W\u2193") : _T("W\u2191"), rtSig.wr == -1 ? BUY_COLORS[rtSig.wrStr - 1] : SELL_COLORS[rtSig.wrStr - 1] });
-
-				if (!sigItems.empty())
-				{
-					CString riskText;
-					COLORREF riskColor = COLOR_BLACK;
+					int signalEndIndex = -1;
+					if (isHovering)
 					{
-						auto stockData = g_data.GetStockData(hover.stockId);
-						if (stockData)
-						{
-							auto min5KLineObj = stockData->getMin5KLineData();
-							auto min30KLineObj = stockData->getMin30KLineData();
-							if (min5KLineObj && min5KLineObj->data.size() >= 60 && min30KLineObj && min30KLineObj->data.size() >= 2)
-							{
-								std::vector<STOCK::Bar> bars5;
-								bars5.reserve(min5KLineObj->data.size());
-								for (const auto& kp : min5KLineObj->data) bars5.push_back(STOCK::Bar::FromKLinePoint(kp));
-								std::vector<STOCK::Bar> bars30;
-								bars30.reserve(min30KLineObj->data.size());
-								for (const auto& kp : min30KLineObj->data) bars30.push_back(STOCK::Bar::FromKLinePoint(kp));
-								STOCK::TrendState30m trendState = CSignalAnalyzer::Get30mTrendState(bars30).state;
-								CString reason = CSignalAnalyzer::CalcForbidResult(bars5, trendState).forbidBuyReason;
-								if (reason.IsEmpty())
-								{
-									riskText = _T("\u221A");
-									bool hasBuy = (rtSig.boll == -1 || rtSig.macd == -1 || rtSig.rsi == -1 || rtSig.kdj == -1 || rtSig.wr == -1);
-									riskColor = hasBuy ? BUY_COLORS[0] : SELL_COLORS[0];
-								}
-								else
-								{
-									riskText = _T("\u00D7") + reason;
-									riskColor = RGB(180, 80, 0);
-								}
-							}
-						}
+						int hoverKlineIdx = ctx.startIndex + hover.hoveredBarIndex;
+						if (hoverKlineIdx >= 25 && hoverKlineIdx < static_cast<int>(bars5.size()))
+							signalEndIndex = hoverKlineIdx;
 					}
 
-					int totalW = 0;
-					for (const auto& item : sigItems)
-						totalW += memDC.GetTextExtent(item.first).cx;
-					if (!riskText.IsEmpty())
-						totalW += memDC.GetTextExtent(riskText).cx;
-					int sigX = ctx.chartWidth - totalW - g_data.RDPI(4);
+					auto rtSig = CSignalAnalyzer::CalcRealtimeSignals(bars5, signalEndIndex);
 
-					for (const auto& item : sigItems)
-					{
-						memDC.SetTextColor(item.second);
-						CSize sz = memDC.GetTextExtent(item.first);
-						memDC.TextOut(sigX, centerY - sz.cy / 2, item.first);
-						sigX += sz.cx;
-					}
-					if (!riskText.IsEmpty())
-					{
-						memDC.SetTextColor(riskColor);
-						CSize sz = memDC.GetTextExtent(riskText);
-						memDC.TextOut(sigX, centerY - sz.cy / 2, riskText);
-					}
+					static const COLORREF BUY_COLORS[] = {
+						RGB(40, 240, 40),
+						RGB(50, 180, 50),
+						RGB(20, 130, 40)
+					};
+					static const COLORREF SELL_COLORS[] = {
+						RGB(240, 40, 40),
+						RGB(180, 50, 50),
+						RGB(130, 20, 40)
+					};
+
+					// 超卖(买入信号=-1)→红色(要涨)，超买(卖出信号=1)→绿色(要跌)
+					if (rtSig.boll != 0) hover.bollSignalColor = rtSig.boll == -1 ? SELL_COLORS[rtSig.bollStr - 1] : BUY_COLORS[rtSig.bollStr - 1];
+					if (rtSig.macd != 0) hover.macdSignalColor = rtSig.macd == -1 ? SELL_COLORS[rtSig.macdStr - 1] : BUY_COLORS[rtSig.macdStr - 1];
+					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
+					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
+					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
 				}
 			}
 		}
@@ -2111,66 +1948,64 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 						RGB(130, 20, 40)
 					};
 
-					std::vector<std::pair<CString, COLORREF>> sigItems;
-					if (rtSig.macd != 0) sigItems.push_back({ rtSig.macd == -1 ? _T("M\u2193") : _T("M\u2191"), rtSig.macd == -1 ? BUY_COLORS[rtSig.macdStr - 1] : SELL_COLORS[rtSig.macdStr - 1] });
-					if (rtSig.boll != 0) sigItems.push_back({ rtSig.boll == -1 ? _T("B\u2193") : _T("B\u2191"), rtSig.boll == -1 ? BUY_COLORS[rtSig.bollStr - 1] : SELL_COLORS[rtSig.bollStr - 1] });
-					if (rtSig.kdj != 0) sigItems.push_back({ rtSig.kdj == -1 ? _T("K\u2193") : _T("K\u2191"), rtSig.kdj == -1 ? BUY_COLORS[rtSig.kdjStr - 1] : SELL_COLORS[rtSig.kdjStr - 1] });
-					if (rtSig.rsi != 0) sigItems.push_back({ rtSig.rsi == -1 ? _T("R\u2193") : _T("R\u2191"), rtSig.rsi == -1 ? BUY_COLORS[rtSig.rsiStr - 1] : SELL_COLORS[rtSig.rsiStr - 1] });
-					if (rtSig.wr != 0) sigItems.push_back({ rtSig.wr == -1 ? _T("W\u2193") : _T("W\u2191"), rtSig.wr == -1 ? BUY_COLORS[rtSig.wrStr - 1] : SELL_COLORS[rtSig.wrStr - 1] });
-
-					if (!sigItems.empty())
-					{
-						CString riskText;
-						COLORREF riskColor = COLOR_BLACK;
-						{
-							auto min30KLineObj = stockData->getMin30KLineData();
-							if (min30KLineObj && min30KLineObj->data.size() >= 2 && bars5.size() >= 60)
-							{
-								std::vector<STOCK::Bar> bars30;
-								bars30.reserve(min30KLineObj->data.size());
-								for (const auto& kp : min30KLineObj->data) bars30.push_back(STOCK::Bar::FromKLinePoint(kp));
-								STOCK::TrendState30m trendState = CSignalAnalyzer::Get30mTrendState(bars30).state;
-								CString reason = CSignalAnalyzer::CalcForbidResult(bars5, trendState).forbidBuyReason;
-								if (reason.IsEmpty())
-								{
-									riskText = _T("\u221A");
-									bool hasBuy = (rtSig.boll == -1 || rtSig.macd == -1 || rtSig.rsi == -1 || rtSig.kdj == -1 || rtSig.wr == -1);
-									riskColor = hasBuy ? BUY_COLORS[0] : SELL_COLORS[0];
-								}
-								else
-								{
-									riskText = _T("\u00D7") + reason;
-									riskColor = RGB(180, 80, 0);
-								}
-							}
-						}
-
-						int totalW = 0;
-						for (const auto& item : sigItems)
-							totalW += memDC.GetTextExtent(item.first).cx;
-						if (!riskText.IsEmpty())
-							totalW += memDC.GetTextExtent(riskText).cx;
-						int xPos = ctx.chartWidth - totalW - g_data.RDPI(4);
-
-						for (const auto& item : sigItems)
-						{
-							memDC.SetTextColor(item.second);
-							CSize sz = memDC.GetTextExtent(item.first);
-							memDC.TextOut(xPos, centerY - sz.cy / 2, item.first);
-							xPos += sz.cx;
-						}
-						if (!riskText.IsEmpty())
-						{
-							memDC.SetTextColor(riskColor);
-							CSize sz = memDC.GetTextExtent(riskText);
-							memDC.TextOut(xPos, centerY - sz.cy / 2, riskText);
-						}
-					}
+					// 超卖(买入信号=-1)→红色(要涨)，超买(卖出信号=1)→绿色(要跌)
+					if (rtSig.boll != 0) hover.bollSignalColor = rtSig.boll == -1 ? SELL_COLORS[rtSig.bollStr - 1] : BUY_COLORS[rtSig.bollStr - 1];
+					if (rtSig.macd != 0) hover.macdSignalColor = rtSig.macd == -1 ? SELL_COLORS[rtSig.macdStr - 1] : BUY_COLORS[rtSig.macdStr - 1];
+					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
+					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
+					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
 				}
 			}
 		}
 		else
 		{
+			// 30分钟K线/日K线模式：计算信号颜色
+			auto stockData = g_data.GetStockData(hover.stockId);
+			if (stockData)
+			{
+				std::vector<STOCK::Bar> bars;
+				if (hover.viewMode == UI_VIEW_MIN30_KLINE)
+				{
+					auto min30KLineObj = stockData->getMin30KLineData();
+					if (min30KLineObj && min30KLineObj->data.size() >= 26)
+					{
+						bars.reserve(min30KLineObj->data.size());
+						for (const auto& kp : min30KLineObj->data) bars.push_back(STOCK::Bar::FromKLinePoint(kp));
+					}
+				}
+				else if (hover.viewMode == UI_VIEW_DAY_KLINE)
+				{
+					auto klineObj = stockData->getKLineData();
+					if (klineObj && klineObj->data.size() >= 26)
+					{
+						bars.reserve(klineObj->data.size());
+						for (const auto& kp : klineObj->data) bars.push_back(STOCK::Bar::FromKLinePoint(kp));
+					}
+				}
+
+				if (bars.size() >= 26)
+				{
+					int signalEndIndex = -1;
+					if (isHovering)
+					{
+						int hoverKlineIdx = ctx.startIndex + hover.hoveredBarIndex;
+						if (hoverKlineIdx >= 25 && hoverKlineIdx < static_cast<int>(bars.size()))
+							signalEndIndex = hoverKlineIdx;
+					}
+
+					auto rtSig = CSignalAnalyzer::CalcRealtimeSignals(bars, signalEndIndex);
+
+					static const COLORREF BUY_COLORS[] = { RGB(40, 240, 40), RGB(50, 180, 50), RGB(20, 130, 40) };
+					static const COLORREF SELL_COLORS[] = { RGB(240, 40, 40), RGB(180, 50, 50), RGB(130, 20, 40) };
+
+					if (rtSig.boll != 0) hover.bollSignalColor = rtSig.boll == -1 ? SELL_COLORS[rtSig.bollStr - 1] : BUY_COLORS[rtSig.bollStr - 1];
+					if (rtSig.macd != 0) hover.macdSignalColor = rtSig.macd == -1 ? SELL_COLORS[rtSig.macdStr - 1] : BUY_COLORS[rtSig.macdStr - 1];
+					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
+					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
+					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
+				}
+			}
+
 			if (hover.showMA)
 			{
 				STOCK::Price dispMa5 = isHovering ? hover.hoverMa5 : ctx.ma5;

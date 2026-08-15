@@ -32,7 +32,7 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 	// 布局：0=委比, 1=趋势, 2=最高/最低, 3-7=卖五~卖一, 8-12=买一~买五, 13-14=净比05/30, 15=净比99, 16=振幅, 17=换手率
 	// 净比00画在卖一(行7)和买一(行8)之间的间隙，不占独立行
 	const int totalRows = 18;
-	const int headerHeight = g_data.RDPI(26);  // 主标题栏高度
+	const int headerHeight = g_data.RDPI(26) + g_data.RDPI(20);  // 主标题栏+管理股票栏高度
 	const int obTitleH = g_data.RDPI(16);       // 盘口标题栏高度，与走势图标题栏一致
 	const int topOffset = headerHeight + obTitleH;  // 内容从主标题栏+盘口标题栏下方开始
 	const int panelW = right - left;

@@ -59,13 +59,13 @@ protected:
 	afx_msg void OnBnClickedMin5KLineBtn();
 	afx_msg void OnBnClickedMin30KLineBtn();
 	afx_msg void OnBnClickedKLineBtn();
-	afx_msg void OnBnClickedJZBtn();
 	afx_msg void OnBnClickedCloseBtn();
 	afx_msg void OnBnClickedMABtn();
 	afx_msg void OnBnClickedBollBtn();
 	afx_msg void OnBnClickedZoomOutBtn();
 	afx_msg void OnBnClickedZoomInBtn();
 	afx_msg void OnBnClickedIndicatorMACDBtn();
+	afx_msg void OnBnClickedIndicatorMACDSignalBtn();
 	afx_msg void OnBnClickedIndicatorKDJBtn();
 	afx_msg void OnBnClickedIndicatorWRBtn();
 	afx_msg void OnBnClickedIndicatorRSIBtn();
@@ -96,8 +96,11 @@ private:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
 	void UpdateModeButtons();
 	void UpdatePeriodComboVisibility();
+	void ApplySignalColors(COLORREF bollColor, COLORREF macdColor, COLORREF kdjColor, COLORREF wrColor, COLORREF rsiColor);
 
 	CTransparentWnd m_CTransparentWnd;
 	CStockListPanel m_stockListPanel;
@@ -113,7 +116,6 @@ private:
 	CButton m_btnKLine;
 	CButton m_btnMin5KLine;
 	CButton m_btnMin30KLine;
-	CButton m_btnJZ;
 	CButton m_btnMA;
 	CButton m_btnBoll;
 	CButton m_btnClose;
@@ -123,6 +125,7 @@ private:
 	CButton m_btnZoomOut;  // 缩小按钮（显示240分钟）
 	CButton m_btnZoomIn;   // 放大按钮（显示60分钟）
 	CButton m_btnIndicatorCJL;  // CJL指标按钮
+	CButton m_btnIndicatorMACD;  // MACD信号按钮
 	CButton m_btnIndicatorKDJ;   // KDJ指标按钮
 	CButton m_btnIndicatorWR;    // W&R指标按钮
 	CButton m_btnIndicatorRSI;   // RSI指标按钮
@@ -140,7 +143,7 @@ private:
 	int m_vScrollOffset{ 0 };
 
 	// 分时图指标类型
-	enum class TimelineIndicator { CJL, KDJ, WR, RSI };
+	enum class TimelineIndicator { CJL, MACD, KDJ, WR, RSI };
 	TimelineIndicator m_timelineIndicator{ TimelineIndicator::KDJ };
 	bool m_indicatorBtnsInitialized{ false };
 
@@ -206,4 +209,11 @@ private:
 
 	// 总览表行信息（用于双击处理）
 	std::vector<OverviewRowInfo> m_overviewRows;
+
+	// 信号颜色（由ApplySignalColors设置，供OnDrawItem使用）
+	COLORREF m_bollSignalColor{ CLR_INVALID };
+	COLORREF m_macdSignalColor{ CLR_INVALID };
+	COLORREF m_kdjSignalColor{ CLR_INVALID };
+	COLORREF m_wrSignalColor{ CLR_INVALID };
+	COLORREF m_rsiSignalColor{ CLR_INVALID };
 };

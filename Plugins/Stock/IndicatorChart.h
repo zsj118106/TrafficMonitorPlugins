@@ -19,7 +19,7 @@ public:
     using RSIData = CStockIndicator::RSIData;
 
     // 分时图指标类型（与CFloatingWnd::TimelineIndicator对应）
-    enum class TimelineIndicator { CJL, KDJ, WR, RSI };
+    enum class TimelineIndicator { CJL, MACD, KDJ, WR, RSI };
 
     // 分时图指标绘制所需的悬停状态
     struct HoverState {
@@ -48,9 +48,6 @@ public:
                        int klinePeriodDays, int scrollOffset,
                        int startIndex = 0, int visibleCount = -1);
 
-    // 绘制分时MACD区域（标题栏+图表+网格+时间标签）
-    void DrawTimelineMACDSection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
-
     // 绘制分时KDJ区域
     void DrawTimelineKDJSection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
 
@@ -77,11 +74,6 @@ public:
 
     // 绘制分时RSI区域
     void DrawTimelineRSISection(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
-
-    // 绘制K线模式KDJ图表（含K线背景、网格、标题）
-    void DrawKDJChart(CDC& memDC, int x, int y, int width, int height,
-                      const std::vector<STOCK::KLinePoint>& klineData,
-                      int klinePeriodDays, int scrollOffset);
 
     // ========== 区域绘制（标题栏+图表一体化） ==========
 

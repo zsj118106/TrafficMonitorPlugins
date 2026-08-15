@@ -52,7 +52,6 @@ public:
 	// 分时缓存
 	bool SaveTimelineCache(const std::wstring& stockCode,
 		const std::vector<STOCK::TimelinePoint>& data);
-	bool HasTimelineCache(const std::wstring& stockCode);
 	// 加载指定交易日的分时数据
 	std::vector<STOCK::TimelinePoint> LoadTimelineCache(const std::wstring& stockCode,
 		const std::string& tradeDate);
@@ -79,7 +78,6 @@ public:
 	// 关联股票均幅统计
 	bool SaveAvgDiffStats(const std::wstring& stockCode, double minVal, double maxVal, double currentVal);
 	AvgDiffStats LoadAvgDiffStats(const std::wstring& stockCode);
-	void CleanExpiredAvgDiffStats();
 
 	// 基金净值按分钟缓存
 	bool SaveFundNavCache(const std::wstring& stockCode,
@@ -87,7 +85,6 @@ public:
 	std::vector<STOCK::TimelinePoint> LoadFundNavCache(const std::wstring& stockCode,
 		const std::string& tradeDate);
 	std::vector<STOCK::TimelinePoint> LoadLatestFundNavCache(const std::wstring& stockCode);
-	bool HasFundNavCache(const std::wstring& stockCode);
 
 private:
 	sqlite3* m_db{ nullptr };

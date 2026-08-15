@@ -43,29 +43,6 @@ bool CCommon::GetURL(const std::wstring& url, std::string& result, bool utf8, LP
 	return CNetFetch::GetURL(url, result, user_agent, headers);
 }
 
-std::wstring CCommon::URLEncode(const std::wstring& wstr)
-{
-	std::string str_utf8;
-	std::wstring result{};
-	wchar_t buff[4];
-	str_utf8 = CCommon::UnicodeToStr(wstr.c_str(), true);
-	for (const auto& ch : str_utf8)
-	{
-		if (ch == ' ')
-			result.push_back(L'+');
-		else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))
-			result.push_back(static_cast<wchar_t>(ch));
-		else if (ch == '-' || ch == '_' || ch == '.' || ch == '!' || ch == '~' || ch == '*'/* || ch == '\''*/ || ch == '(' || ch == ')')
-			result.push_back(static_cast<wchar_t>(ch));
-		else
-		{
-			swprintf_s(buff, L"%%%x", static_cast<unsigned char>(ch));
-			result += buff;
-		}
-	}
-	return result;
-}
-
 void CCommon::WriteLog(const WORD w, LPCTSTR file_path)
 {
 	char buff[32];
@@ -309,18 +286,6 @@ CString CCommon::FormatProfitLoss(double percent, double amount, bool showPercen
 			str.Format(_T("%g(%.2f%%)"), amount, percent);
 	}
 	return str;
-}
-
-CString CCommon::FormatDate(int year, int month, int day)
-{
-	CString str;
-	str.Format(_T("%04d-%02d-%02d"), year, month, day);
-	return str;
-}
-
-bool CCommon::ParseDate(const CString& dateStr, int& year, int& month, int& day)
-{
-	return swscanf_s(dateStr.GetString(), L"%d-%d-%d", &year, &month, &day) == 3;
 }
 
 CString CCommon::FormatSignedValue(double value, const CString& format)

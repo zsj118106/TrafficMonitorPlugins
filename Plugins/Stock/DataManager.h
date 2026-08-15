@@ -12,14 +12,6 @@
 
 using namespace STOCK;
 
-// 线性回归结果
-struct RegResult
-{
-	bool valid;    // true=数据足够，结果可信
-	double slope;  // 回归斜率k
-	double r2;     // 拟合优度R²
-};
-
 #define g_data CDataManager::Instance()
 
 struct SettingData
@@ -57,9 +49,7 @@ public:
 	void LoadConfig(const std::wstring& config_dir);
 	void SaveConfig();
 	const CString& StringRes(UINT id); // 根据资源id获取一个字符串资源
-	void DPIFromWindow(CWnd* pWnd);
 	int DPI(int pixel);
-	float DPIF(float pixel);
 	int RDPI(int pixel);
 	HICON GetIcon(UINT id);
 	void ResetText();
@@ -92,10 +82,8 @@ public:
 	// 筹码分布：根据K线计算筹码分布并入库
 	void ApplyChipDistribution(const std::wstring& code, const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::Volume totalShares);
 
-	bool HasTimelineCache(const std::wstring& stockCode);
 	bool HasKLineCache(const std::wstring& stockCode, STOCK::Period period);
 	STOCK::Volume GetCirculatingAShares(const std::wstring& code);
-	const STOCK::ChipDistribution* GetChipDistribution(const std::wstring& code);
 
 	SettingData m_setting_data;
 	std::wstring m_log_path;
@@ -139,12 +127,6 @@ public:
 	// 均值线性回归趋势（基于历史队列）
 	RegResult Get1MinAvgTrend(const std::wstring& code);   // 1分钟（最近12个点）
 	RegResult Get5MinAvgTrend(const std::wstring& code);   // 5分钟（全部60个点）
-
-	// 计算N日均线 (当前价格 + 前N-1天收盘价) / N
-	double CalculateMA(const std::wstring& code, double currentPrice, int N);
-
-	// 计算N日平均振幅
-	double CalculateAverageAmplitude(const std::wstring& code, int days = 5);
 
 	// 交易记录数据库操作
 	bool SaveTradeRecord(const std::wstring& stockCode, const std::wstring& stockName, int tradeType, const std::wstring& time, double price, double amount, double totalAmount, double fee, double total);

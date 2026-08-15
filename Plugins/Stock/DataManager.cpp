@@ -2,6 +2,7 @@
 #include "DataManager.h"
 #include "Common.h"
 #include "Stock.h"
+#include "SignalAnalyzer.h"
 #include <vector>
 
 #include <sstream>
@@ -130,7 +131,6 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
 
 	m_db_mgr.Init(m_config_path);
 	m_db_mgr.CleanExpiredData();
-	//m_db_mgr.CleanExpiredAvgDiffStats();
 	LoadTodayInnerOuterSnapshots();
 	LoadChipDistributions();
 	LoadStockBasicData();
@@ -177,11 +177,6 @@ bool CDataManager::SaveKLineCache(const std::wstring& stockCode, STOCK::Period p
 bool CDataManager::SaveFundNavCache(const std::wstring& stockCode, const std::vector<STOCK::TimelinePoint>& data)
 {
 	return m_db_mgr.SaveFundNavCache(stockCode, data);
-}
-
-bool CDataManager::HasTimelineCache(const std::wstring& stockCode)
-{
-	return m_db_mgr.HasTimelineCache(stockCode);
 }
 
 bool CDataManager::HasKLineCache(const std::wstring& stockCode, STOCK::Period period)
@@ -503,19 +498,7 @@ const CString& CDataManager::StringRes(UINT id)
 	}
 }
 
-void CDataManager::DPIFromWindow(CWnd* pWnd)
-{
-	CWindowDC dc(pWnd);
-	HDC hDC = dc.GetSafeHdc();
-	m_dpi = GetDeviceCaps(hDC, LOGPIXELSY);
-}
-
 int CDataManager::DPI(int pixel)
-{
-	return m_dpi * pixel / 96;
-}
-
-float CDataManager::DPIF(float pixel)
 {
 	return m_dpi * pixel / 96;
 }
@@ -883,14 +866,6 @@ void CDataManager::ApplyChipDistribution(const std::wstring& code, const std::ve
 	SaveChipDistribution(code, chipData);
 }
 
-const STOCK::ChipDistribution* CDataManager::GetChipDistribution(const std::wstring& code)
-{
-	auto stockData = GetStockData(code);
-	if (!stockData || !stockData->chipDistribution.IsValid())
-		return nullptr;
-	return &stockData->chipDistribution;
-}
-
 STOCK::Volume CDataManager::GetCirculatingAShares(const std::wstring& code)
 {
 	auto stockData = GetStockData(code);
@@ -1211,54 +1186,6 @@ void CDataManager::PushAvgDiffHistory(const std::wstring& code, double avgDiff)
 		queue.pop_front();
 }
 
-// 核心线性回归计算（纯计算，无IO）
-static RegResult CalcLinearReg(const std::deque<double>& win)
-{
-	RegResult result;
-	result.valid = false;
-	result.slope = 0.0;
-	result.r2 = 0.0;
-
-	int n = static_cast<int>(win.size());
-	if (n < 6)
-		return result;
-
-	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
-	for (int i = 0; i < n; i++)
-	{
-		double x = static_cast<double>(i);
-		double y = win[i];
-		Sx += x;
-		Sy += y;
-		Sxx += x * x;
-		Syy += y * y;
-		Sxy += x * y;
-	}
-
-	double dn = static_cast<double>(n);
-	double denom = dn * Sxx - Sx * Sx;
-	if (denom == 0.0)
-		return result;
-
-	double numer = dn * Sxy - Sx * Sy;
-	result.slope = numer / denom;
-
-	double SStotal = dn * Syy - Sy * Sy;
-	if (SStotal == 0.0)
-	{
-		// 所有y值相同，完美拟合
-		result.r2 = 1.0;
-	}
-	else
-	{
-		double SSres = SStotal - numer * numer / denom;
-		result.r2 = 1.0 - SSres / SStotal;
-	}
-
-	result.valid = true;
-	return result;
-}
-
 RegResult CDataManager::Get1MinAvgTrend(const std::wstring& code)
 {
 	auto it = m_avg_diff_history.find(code);
@@ -1275,7 +1202,7 @@ RegResult CDataManager::Get1MinAvgTrend(const std::wstring& code)
 	// 取最近6个点（30秒：6×5秒=30秒）
 	int startIdx = max(0, static_cast<int>(queue.size()) - 6);
 	std::deque<double> win(queue.begin() + startIdx, queue.end());
-	return CalcLinearReg(win);
+	return CSignalAnalyzer::CalcLinearRegFromDeque(win);
 }
 
 RegResult CDataManager::Get5MinAvgTrend(const std::wstring& code)
@@ -1291,33 +1218,7 @@ RegResult CDataManager::Get5MinAvgTrend(const std::wstring& code)
 	}
 
 	// 5分钟：全部60个点
-	return CalcLinearReg(it->second);
-}
-
-double CDataManager::CalculateMA(const std::wstring& code, double currentPrice, int N)
-{
-	auto stockData = GetStockData(code);
-	if (!stockData)
-		return 0.0;
-
-	auto klineObj = stockData->getKLineData();
-	if (!klineObj || klineObj->data.empty())
-		return 0.0;
-
-	return klineObj->CalculateMA(N);
-}
-
-double CDataManager::CalculateAverageAmplitude(const std::wstring& code, int days)
-{
-	auto stockData = GetStockData(code);
-	if (!stockData)
-		return 0.0;
-
-	auto klineObj = stockData->getKLineData();
-	if (!klineObj || klineObj->data.empty())
-		return 0.0;
-
-	return klineObj->CalculateAverageAmplitude(days);
+	return CSignalAnalyzer::CalcLinearRegFromDeque(it->second);
 }
 
 static bool IsSameLocalDate(time_t lhs, time_t rhs)

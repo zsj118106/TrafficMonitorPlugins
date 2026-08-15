@@ -25,11 +25,6 @@ COptionsDlg::~COptionsDlg()
 {
 }
 
-void COptionsDlg::EnableUpdateBtn(bool enable)
-{
-	::EnableWindow(GetDlgItem(IDC_UPDATE_BUTTON)->GetSafeHwnd(), enable);
-}
-
 void COptionsDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);

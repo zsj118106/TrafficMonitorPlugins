@@ -43,21 +43,15 @@ public:
 	void DrawMAIndicators(CDC& memDC, const KLineDrawData& drawData, const HoverState& hover);
 	void DrawCurrentPriceLine(CDC& memDC, const KLineDrawData& drawData);
 	void DrawPriceLabels(CDC& memDC, const KLineDrawData& drawData);
-	void DrawAverageLabels(CDC& memDC, const KLineDrawData& drawData);
 	void DrawBollBands(CDC& memDC, const KLineDrawData& drawData);
 
 	// K线图主体绘制
 	void DrawKLineBars(CDC& memDC, const KLineDrawData& drawData, const HoverState& hover);
 	void DrawKLineBuyMarkers(CDC& memDC, const KLineDrawData& drawData, const HoverState& hover);
 	void DrawKLinePeriodMarkers(CDC& memDC, const KLineDrawData& drawData, const PeriodPoint periodHighs[3], const PeriodPoint periodLows[3]);
-	void DrawKLineChart(CDC& memDC, int x, int y, int w, int h, const std::vector<STOCK::KLinePoint>& klineData, const STOCK::StockInfo& stockInfo, const HoverState& hover);
-
 	// K线趋势图
 	void DrawKLineTrendCurve(CDC& memDC, const KLineDrawData& drawData, std::vector<CPoint>& outPoints);
 	void DrawKLineTrendBuyMarkers(CDC& memDC, const KLineDrawData& drawData, const std::vector<CPoint>& closePoints, const HoverState& hover);
 	void DrawKLineTrendPeriodMarkers(CDC& memDC, const KLineDrawData& drawData, const std::vector<CPoint>& closePoints, const PeriodPoint periodHighs[3], const PeriodPoint periodLows[3]);
-	void DrawKLineTrendChart(CDC& memDC, int x, int y, int w, int h, const std::vector<STOCK::KLinePoint>& klineData, const STOCK::StockInfo& stockInfo, const HoverState& hover);
-
 	// K线量柱图
-	void DrawKLineVolumeChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::KLinePoint>& klineData, const HoverState& hover);
 };
