@@ -100,7 +100,7 @@ private:
 	afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
 	void UpdateModeButtons();
 	void UpdatePeriodComboVisibility();
-	void ApplySignalColors(COLORREF bollColor, COLORREF macdColor, COLORREF kdjColor, COLORREF wrColor, COLORREF rsiColor);
+	void ApplySignalColors(COLORREF bollColor, COLORREF macdColor, COLORREF kdjColor, COLORREF wrColor, COLORREF rsiColor, COLORREF maColor);
 
 	CTransparentWnd m_CTransparentWnd;
 	CStockListPanel m_stockListPanel;
@@ -216,4 +216,5 @@ private:
 	COLORREF m_kdjSignalColor{ CLR_INVALID };
 	COLORREF m_wrSignalColor{ CLR_INVALID };
 	COLORREF m_rsiSignalColor{ CLR_INVALID };
+	COLORREF m_maSignalColor{ CLR_INVALID };
 };

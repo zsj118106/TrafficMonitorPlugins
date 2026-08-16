@@ -378,12 +378,12 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 		memDC.SelectObject(pOldAvgPen);
 	}
 
-	// MA5/MA10/MA20均线
+	// MA5/MA10/MA20均线配色
 	if (hover.showMA)
 	{
-		const COLORREF ma5Color = RGB(0, 0, 230);
-		const COLORREF ma10Color = RGB(0, 166, 235);
-		const COLORREF ma20Color = RGB(169, 102, 186);
+		const COLORREF ma5Color = RGB(240, 117, 40);
+		const COLORREF ma10Color = RGB(21, 101, 192);
+		const COLORREF ma20Color = RGB(128, 40, 149);
 
 		auto drawMALine = [&](int fieldOffset, COLORREF color) {
 			CPen maPen(PS_SOLID, 1, color);
@@ -539,64 +539,83 @@ void CTimelineChart::DrawTimelinePriceCurve(CDC& memDC, const TimelineDrawContex
 			return ctx.priceChartTop + ctx.priceChartHeight - static_cast<int>(round((price - minPrice) * unitY));
 			};
 
-		auto navPoints = g_data.GetDbManager().LoadLatestFundNavCache(hover.stockId);
-		if (!navPoints.empty())
+		const auto& fullTimeline = *ctx.fullTimeline;
+		std::map<int, double> iopvByIndex;
+
+		// 优先使用内存中fullTimeline的iopv字段（ApplyTimeline/ApplyFundIOPV已填充）
+		for (int i = 0; i < static_cast<int>(fullTimeline.size()); i++)
 		{
-			const auto& fullTimeline = *ctx.fullTimeline;
-			std::map<std::string, int> fullTimeIndexMap;
-			for (int i = 0; i < static_cast<int>(fullTimeline.size()); i++)
+			if (fullTimeline[i].iopv > 0)
 			{
-				std::string hhmm = fullTimeline[i].time.substr(0, 5);
-				fullTimeIndexMap[hhmm] = i;
+				iopvByIndex[i] = fullTimeline[i].iopv;
 			}
+		}
 
-			std::map<int, double> iopvByIndex;
-			for (const auto& nav : navPoints)
+		// 内存数据不足时，从数据库补充（覆盖相同索引，新增缺失索引）
+		if (iopvByIndex.size() < static_cast<size_t>(fullTimeline.size()) / 2)
+		{
+			auto navPoints = g_data.GetDbManager().LoadLatestFundNavCache(hover.stockId);
+			if (!navPoints.empty())
 			{
-				auto it = fullTimeIndexMap.find(nav.time);
-				if (it != fullTimeIndexMap.end())
-					iopvByIndex[it->second] = nav.iopv;
-			}
-
-			if (ctx.realtimeData.iopv > 0 && !fullTimeline.empty())
-			{
-				int lastIdx = static_cast<int>(fullTimeline.size()) - 1;
-				iopvByIndex[lastIdx] = ctx.realtimeData.iopv;
-			}
-
-			if (!iopvByIndex.empty())
-			{
-				const COLORREF navColor = RGB(160, 32, 240);
-				CPen navPen(PS_SOLID, 1, navColor);
-				CPen* pOldPen = memDC.SelectObject(&navPen);
-				bool firstNavPoint = true;
-
-				int startIdx = ctx.startIndex;
-				int visCount = ctx.visibleCount;
-
-				for (const auto& kv : iopvByIndex)
+				std::map<std::string, int> fullTimeIndexMap;
+				for (int i = 0; i < static_cast<int>(fullTimeline.size()); i++)
 				{
-					int fullIdx = kv.first;
-					double iopvVal = kv.second;
+					std::string hhmm = fullTimeline[i].time.substr(0, 5);
+					fullTimeIndexMap[hhmm] = i;
+				}
 
-					if (fullIdx < startIdx || fullIdx >= startIdx + visCount)
-						continue;
-
-					int relIdx = fullIdx - startIdx;
-					int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * relIdx) + static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) / 2);
-					int pointY = priceToY(iopvVal);
-					if (firstNavPoint)
+				for (const auto& nav : navPoints)
+				{
+					auto it = fullTimeIndexMap.find(nav.time);
+					if (it != fullTimeIndexMap.end())
 					{
-						memDC.MoveTo(pointX, pointY);
-						firstNavPoint = false;
-					}
-					else
-					{
-						memDC.LineTo(pointX, pointY);
+						iopvByIndex[it->second] = nav.iopv;
 					}
 				}
-				memDC.SelectObject(pOldPen);
 			}
+		}
+
+		// 追加实时IOPV到最后一个分时点
+		if (ctx.realtimeData.iopv > 0 && !fullTimeline.empty())
+		{
+			int lastIdx = static_cast<int>(fullTimeline.size()) - 1;
+			iopvByIndex[lastIdx] = ctx.realtimeData.iopv;
+		}
+		if (!iopvByIndex.empty())
+		{
+			const COLORREF navColor = RGB(160, 32, 240);
+			CPen navPen(PS_SOLID, 1, navColor);
+			CPen* pOldPen = memDC.SelectObject(&navPen);
+			bool firstNavPoint = true;
+
+			int startIdx = ctx.startIndex;
+			int visCount = ctx.visibleCount;
+			int drawnCount = 0;
+
+			for (const auto& kv : iopvByIndex)
+			{
+				int fullIdx = kv.first;
+				double iopvVal = kv.second;
+
+				if (fullIdx < startIdx || fullIdx >= startIdx + visCount)
+					continue;
+
+				int relIdx = fullIdx - startIdx;
+				int pointX = static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) * relIdx) + static_cast<int>(ctx.chartWidth / static_cast<float>(xAxisPts) / 2);
+				int pointY = priceToY(iopvVal);
+				if (firstNavPoint)
+				{
+					memDC.MoveTo(pointX, pointY);
+					firstNavPoint = false;
+				}
+				else
+				{
+					memDC.LineTo(pointX, pointY);
+				}
+				drawnCount++;
+			}
+
+			memDC.SelectObject(pOldPen);
 		}
 	}
 
@@ -1130,9 +1149,10 @@ void CTimelineChart::DrawMin5KLinePriceChart(CDC& memDC, const TimelineDrawConte
 
 	if (hover.showMA)
 	{
-		const COLORREF ma5Color = RGB(0, 0, 230);
-		const COLORREF ma10Color = RGB(0, 166, 235);
-		const COLORREF ma20Color = RGB(169, 102, 186);
+		// MA5/MA10/MA20均线配色
+		const COLORREF ma5Color = RGB(240, 117, 40);
+		const COLORREF ma10Color = RGB(21, 101, 192);
+		const COLORREF ma20Color = RGB(128, 40, 149);
 
 		auto drawMALine = [&](int fieldOffset, COLORREF color) {
 			CPen maPen(PS_SOLID, 1, color);
@@ -1492,9 +1512,10 @@ void CTimelineChart::DrawDayKLinePriceChart(CDC& memDC, const TimelineDrawContex
 
 	if (hover.showMA)
 	{
-		const COLORREF ma5Color = RGB(0, 0, 230);
-		const COLORREF ma10Color = RGB(0, 166, 235);
-		const COLORREF ma20Color = RGB(169, 102, 186);
+		// 日K线MA均线配色
+		const COLORREF ma5Color = RGB(240, 117, 40);
+		const COLORREF ma10Color = RGB(21, 101, 192);
+		const COLORREF ma20Color = RGB(128, 40, 149);
 
 		auto drawMALine = [&](int fieldOffset, COLORREF color) {
 			CPen maPen(PS_SOLID, 1, color);
@@ -1755,7 +1776,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			memDC.SetTextColor(premColor);
 			CSize premVs = memDC.GetTextExtent(premVal);
 			memDC.TextOut(xPos, centerY - premVs.cy / 2, premVal);
-			xPos += premVs.cx + g_data.RDPI(4);			
+			xPos += premVs.cx + g_data.RDPI(4);
 		}
 		else
 		{
@@ -1829,55 +1850,51 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			memDC.SetTextColor(premColor);
 			CSize premVs = memDC.GetTextExtent(premVal);
 			memDC.TextOut(xPos, centerY - premVs.cy / 2, premVal);
-			xPos += premVs.cx + g_data.RDPI(4);			
+			xPos += premVs.cx + g_data.RDPI(4);
 		}
 		else
 		{
 			drawLabelValue(_T("均:"), dispAvgPrice, COLOR_BLACK, cmpPrevClose(dispAvgPrice));
 		}
 
-		// 分时模式：使用5分钟K线数据计算实时指标信号，设置按钮信号颜色
-		// 注：分时数据仅当天约240点，聚合后仅约40根Bar，指标无法有效触发超买超卖信号
-		// 因此复用5分钟K线数据（多日数百根Bar），与5分钟K线模式信号一致
+		// 分时模式：使用分时数据计算实时指标信号，设置按钮信号颜色
+		// 将分时TimelinePoint转为1分钟Bar序列（open=high=low=close=price），各模式用各自数据
 		{
-			auto stockData = g_data.GetStockData(hover.stockId);
-			if (stockData)
+			// 使用完整分时数据（ctx.fullTimeline），而非可见区域子集
+			const auto& fullTl = ctx.fullTimeline ? *ctx.fullTimeline : timelinePoint;
+			if (fullTl.size() >= 26)
 			{
-				auto min5KLineObj = stockData->getMin5KLineData();
-				if (min5KLineObj && min5KLineObj->data.size() >= 26)
+				std::vector<STOCK::Bar> bars1m = CSignalAnalyzer::ConvertTimelineToBars(fullTl);
+
+				int signalEndIndex = -1;
+				if (isHovering)
 				{
-					std::vector<STOCK::Bar> bars5;
-					bars5.reserve(min5KLineObj->data.size());
-					for (const auto& kp : min5KLineObj->data) bars5.push_back(STOCK::Bar::FromKLinePoint(kp));
-
-					int signalEndIndex = -1;
-					if (isHovering)
-					{
-						int hoverKlineIdx = ctx.startIndex + hover.hoveredBarIndex;
-						if (hoverKlineIdx >= 25 && hoverKlineIdx < static_cast<int>(bars5.size()))
-							signalEndIndex = hoverKlineIdx;
-					}
-
-					auto rtSig = CSignalAnalyzer::CalcRealtimeSignals(bars5, signalEndIndex);
-
-					static const COLORREF BUY_COLORS[] = {
-						RGB(40, 240, 40),
-						RGB(50, 180, 50),
-						RGB(20, 130, 40)
-					};
-					static const COLORREF SELL_COLORS[] = {
-						RGB(240, 40, 40),
-						RGB(180, 50, 50),
-						RGB(130, 20, 40)
-					};
-
-					// 超卖(买入信号=-1)→红色(要涨)，超买(卖出信号=1)→绿色(要跌)
-					if (rtSig.boll != 0) hover.bollSignalColor = rtSig.boll == -1 ? SELL_COLORS[rtSig.bollStr - 1] : BUY_COLORS[rtSig.bollStr - 1];
-					if (rtSig.macd != 0) hover.macdSignalColor = rtSig.macd == -1 ? SELL_COLORS[rtSig.macdStr - 1] : BUY_COLORS[rtSig.macdStr - 1];
-					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
-					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
-					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
+					// ctx.startIndex + hover.hoveredBarIndex 是分时数据的全局索引，与bars1m索引一致
+					int hoverIdx = ctx.startIndex + hover.hoveredBarIndex;
+					if (hoverIdx >= 25 && hoverIdx < static_cast<int>(bars1m.size()))
+						signalEndIndex = hoverIdx;
 				}
+
+				auto rtSig = CSignalAnalyzer::CalcRealtimeSignals(bars1m, signalEndIndex);
+
+				static const COLORREF BUY_COLORS[] = {
+					RGB(40, 240, 40),
+					RGB(50, 180, 50),
+					RGB(20, 130, 40)
+				};
+				static const COLORREF SELL_COLORS[] = {
+					RGB(240, 40, 40),
+					RGB(180, 50, 50),
+					RGB(130, 20, 40)
+				};
+
+				// 超卖(买入信号=-1)→红色(要涨)，超买(卖出信号=1)→绿色(要跌)
+				if (rtSig.boll != 0) hover.bollSignalColor = rtSig.boll == -1 ? SELL_COLORS[rtSig.bollStr - 1] : BUY_COLORS[rtSig.bollStr - 1];
+				if (rtSig.macd != 0) hover.macdSignalColor = rtSig.macd == -1 ? SELL_COLORS[rtSig.macdStr - 1] : BUY_COLORS[rtSig.macdStr - 1];
+				if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
+				if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
+				if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
+				if (rtSig.ma != 0) hover.maSignalColor = rtSig.ma == -1 ? SELL_COLORS[rtSig.maStr - 1] : BUY_COLORS[rtSig.maStr - 1];
 			}
 		}
 	}
@@ -1954,9 +1971,11 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
 					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
 					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
+					if (rtSig.ma != 0) hover.maSignalColor = rtSig.ma == -1 ? SELL_COLORS[rtSig.maStr - 1] : BUY_COLORS[rtSig.maStr - 1];
 				}
 			}
 		}
+
 		else
 		{
 			// 30分钟K线/日K线模式：计算信号颜色
@@ -2003,6 +2022,7 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 					if (rtSig.kdj != 0) hover.kdjSignalColor = rtSig.kdj == -1 ? SELL_COLORS[rtSig.kdjStr - 1] : BUY_COLORS[rtSig.kdjStr - 1];
 					if (rtSig.rsi != 0) hover.rsiSignalColor = rtSig.rsi == -1 ? SELL_COLORS[rtSig.rsiStr - 1] : BUY_COLORS[rtSig.rsiStr - 1];
 					if (rtSig.wr != 0) hover.wrSignalColor = rtSig.wr == -1 ? SELL_COLORS[rtSig.wrStr - 1] : BUY_COLORS[rtSig.wrStr - 1];
+					if (rtSig.ma != 0) hover.maSignalColor = rtSig.ma == -1 ? SELL_COLORS[rtSig.maStr - 1] : BUY_COLORS[rtSig.maStr - 1];
 				}
 			}
 
@@ -2012,9 +2032,13 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 				STOCK::Price dispMa10 = isHovering ? hover.hoverMa10 : ctx.ma10;
 				STOCK::Price dispMa20 = isHovering ? hover.hoverMa20 : ctx.ma20;
 				std::vector<std::pair<CString, COLORREF>> items;
-				if (dispMa5 > 0) items.push_back({ _T("MA5:") + formatPrice(dispMa5), RGB(0, 0, 230) });
-				if (dispMa10 > 0) items.push_back({ _T("MA10:") + formatPrice(dispMa10), RGB(0, 166, 235) });
-				if (dispMa20 > 0) items.push_back({ _T("MA20:") + formatPrice(dispMa20), RGB(169, 102, 186) });
+				// 30分钟/日K线MA均线配色
+				const COLORREF ma5TextColor = RGB(240, 117, 40);
+				const COLORREF ma10TextColor = RGB(21, 101, 192);
+				const COLORREF ma20TextColor = RGB(128, 40, 149);
+				if (dispMa5 > 0) items.push_back({ _T("MA5:") + formatPrice(dispMa5), ma5TextColor });
+				if (dispMa10 > 0) items.push_back({ _T("MA10:") + formatPrice(dispMa10), ma10TextColor });
+				if (dispMa20 > 0) items.push_back({ _T("MA20:") + formatPrice(dispMa20), ma20TextColor });
 				drawRightLabelValues(items);
 			}
 		}

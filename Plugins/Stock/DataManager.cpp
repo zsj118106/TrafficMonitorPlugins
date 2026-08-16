@@ -733,9 +733,9 @@ void CDataManager::ApplyFundIOPV(const std::wstring& code, const std::string& re
 	CString strData(resp.c_str());
 	stockMarket.LoadFundIOPVData(code, strData);
 
-	// 将当前IOPV值按分钟保存到数据库
+	// 将当前IOPV值按分钟保存到数据库（仅交易时段写入，避免非交易时段写入无效时间戳）
 	auto stockData = GetStockData(code);
-	if (stockData && stockData->info.iopv > 0)
+	if (stockData && stockData->info.iopv > 0 && CCommon::IsMarketSession())
 	{
 		// 获取当前时间的分钟字符串（HH:MM）
 		time_t now = time(nullptr);

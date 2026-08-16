@@ -108,6 +108,13 @@ void CStockIndicator::CalcNiceAxisRange(double visMin, double visMax, double div
 		axisMax += niceStep;
 		actualDivCount += 1.0;
 	}
+	// 如果axisMax刚好贴着visMax（数据贴边），向上多留一个niceStep边距，
+	// 避免辅助线（如布林带上轨）超出可视区
+	if (fabs(axisMax - visMax) < niceStep * 1e-6)
+	{
+		axisMax += niceStep;
+		actualDivCount += 1.0;
+	}
 
 	// 三位小数精度截断（与显示格式一致）
 	axisMin = round(axisMin * 1000.0) / 1000.0;

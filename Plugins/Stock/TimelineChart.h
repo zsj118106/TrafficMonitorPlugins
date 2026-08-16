@@ -43,6 +43,7 @@ public:
 		COLORREF kdjSignalColor{ CLR_INVALID };     // KDJ按钮信号颜色
 		COLORREF wrSignalColor{ CLR_INVALID };      // W&R按钮信号颜色
 		COLORREF rsiSignalColor{ CLR_INVALID };     // RSI按钮信号颜色
+		COLORREF maSignalColor{ CLR_INVALID };      // MA按钮信号颜色：金叉=红色，死叉=绿色
 	};
 
 	// 分时图绘制

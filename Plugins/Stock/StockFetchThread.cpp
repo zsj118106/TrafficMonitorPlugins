@@ -779,7 +779,7 @@ void CStockFetchThread::FetchAllData()
 	if (!focusId.empty())
 	{
 		FetchTimeline(focusId);
-		if (CCommon::IsFundCode(focusId))
+		if (CCommon::IsFundCode(focusId) && CCommon::IsMarketSession())
 			FetchFundIOPV(focusId);
 	}
 }

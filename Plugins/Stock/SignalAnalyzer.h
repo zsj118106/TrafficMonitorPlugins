@@ -248,7 +248,8 @@ public:
 		int rsi;    int rsiStr;    // RSI：超买(>70)=卖出(1)，超卖(<30)=买入(-1)
 		int kdj;    int kdjStr;    // KDJ：超买(K>80)=卖出(1)，超卖(K<20)=买入(-1)
 		int wr;     int wrStr;     // W&R：超买(<20)=卖出(1)，超卖(>80)=买入(-1)
-		RealtimeSignal() : boll(0), bollStr(0), macd(0), macdStr(0), rsi(0), rsiStr(0), kdj(0), kdjStr(0), wr(0), wrStr(0) {}
+		int ma;     int maStr;     // MA：金叉(MA5上穿MA10或MA10上穿MA20)=买入(-1)，死叉(MA5下穿MA10或MA10下穿MA20)=卖出(1)
+		RealtimeSignal() : boll(0), bollStr(0), macd(0), macdStr(0), rsi(0), rsiStr(0), kdj(0), kdjStr(0), wr(0), wrStr(0), ma(0), maStr(0) {}
 	};
 	static RealtimeSignal CalcRealtimeSignals(const std::vector<STOCK::Bar>& bars5, int endIndex = -1);
 

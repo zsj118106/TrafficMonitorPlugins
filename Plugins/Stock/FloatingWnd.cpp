@@ -203,7 +203,7 @@ int CFloatingWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_btnBoll.ShowWindow(SW_HIDE);
 
 	CRect maBtnRect(0, 0, rightBtnWidth, btnHeight);
-	m_btnMA.Create(_T("MA"), WS_CHILD | BS_PUSHBUTTON | BS_FLAT, maBtnRect, this, IDC_MA_BTN);
+	m_btnMA.Create(_T("MA"), WS_CHILD | BS_OWNERDRAW, maBtnRect, this, IDC_MA_BTN);
 	m_btnMA.ShowWindow(SW_HIDE);
 
 	// 缩放按钮（分时模式专用，初始隐藏，在量柱图标题栏右侧定位）
@@ -211,8 +211,8 @@ int CFloatingWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	const int zoomBtnHeight = g_data.RDPI(16);
 	CRect zoomOutRect(0, 0, zoomBtnWidth, zoomBtnHeight);
 	CRect zoomInRect(0, 0, zoomBtnWidth, zoomBtnHeight);
-	m_btnZoomOut.Create(_T("—"), WS_CHILD | BS_PUSHBUTTON | BS_FLAT, zoomOutRect, this, IDC_ZOOM_OUT_BTN);
-	m_btnZoomIn.Create(_T("＋"), WS_CHILD | BS_PUSHBUTTON | BS_FLAT, zoomInRect, this, IDC_ZOOM_IN_BTN);
+	m_btnZoomOut.Create(_T("<"), WS_CHILD | BS_PUSHBUTTON | BS_FLAT, zoomOutRect, this, IDC_ZOOM_OUT_BTN);
+	m_btnZoomIn.Create(_T(">"), WS_CHILD | BS_PUSHBUTTON | BS_FLAT, zoomInRect, this, IDC_ZOOM_IN_BTN);
 	m_btnZoomOut.ShowWindow(SW_HIDE);
 	m_btnZoomIn.ShowWindow(SW_HIDE);
 
@@ -555,6 +555,8 @@ void CFloatingWnd::OnPaint()
 			SafeSetWindowPos(m_btnIndicatorWR, btnX, btn5Y, btnW, kdjBtnH);
 			SafeSetWindowPos(m_btnIndicatorRSI, btnX, btn6Y, btnW, kdjBtnH);
 			SafeShowWindow(m_btnIndicatorCJL, false);
+			// 强制重绘自绘按钮，避免初始零尺寸创建后不显示
+			m_btnIndicatorMACD.Invalidate();
 
 			int closeBtnW = g_data.RDPI(20);
 			int closeBtnH = g_data.RDPI(18);
@@ -871,6 +873,18 @@ void CFloatingWnd::OnPaint()
 							visMin = (std::min)(visMin, lowerBand);
 					}
 				}
+				// 开启基金净值曲线时，Y轴范围同时包含可见区间的IOPV值，避免净值曲线绘制到图表区外
+				if (m_showJZCurve && m_viewMode < UI_VIEW_MIN5_KLINE)
+				{
+					for (const auto& tp : subTimeline)
+					{
+						if (tp.iopv > 0)
+						{
+							visMax = (std::max)(visMax, tp.iopv);
+							visMin = (std::min)(visMin, tp.iopv);
+						}
+					}
+				}
 				if (visMin == (std::numeric_limits<STOCK::Price>::max)() || visMax <= visMin)
 				{
 					// 数据无效，回退到涨跌停范围
@@ -966,7 +980,7 @@ void CFloatingWnd::OnPaint()
 			memDC.RestoreDC(-1);
 
 			// 应用信号颜色到按钮背景
-			ApplySignalColors(tlHover.bollSignalColor, tlHover.macdSignalColor, tlHover.kdjSignalColor, tlHover.wrSignalColor, tlHover.rsiSignalColor);
+			ApplySignalColors(tlHover.bollSignalColor, tlHover.macdSignalColor, tlHover.kdjSignalColor, tlHover.wrSignalColor, tlHover.rsiSignalColor, tlHover.maSignalColor);
 
 			// 定位缩放按钮（MACD图标题栏最右侧，原始坐标系）
 			{
@@ -1026,6 +1040,7 @@ void CFloatingWnd::OnPaint()
 					m_indicatorBtnsInitialized = true;
 				}
 				// 强制重绘指标按钮，避免位置变化后按钮不显示
+				m_btnIndicatorMACD.Invalidate();
 				m_btnIndicatorKDJ.Invalidate();
 				m_btnIndicatorWR.Invalidate();
 				m_btnIndicatorRSI.Invalidate();
@@ -2145,7 +2160,7 @@ void CFloatingWnd::UpdateModeButtons()
 			SafeSetButtonStyle(m_btnKLine, BS_FLAT);
 		}
 
-		SafeSetButtonStyle(m_btnMA, m_showMA ? BS_DEFPUSHBUTTON : BS_FLAT);
+		if (m_btnMA.GetSafeHwnd()) m_btnMA.Invalidate();
 		SafeSetButtonStyle(m_btnMin5KLine, m_viewMode == UI_VIEW_MIN5_KLINE ? BS_DEFPUSHBUTTON : BS_FLAT);
 		SafeSetButtonStyle(m_btnMin30KLine, m_viewMode == UI_VIEW_MIN30_KLINE ? BS_DEFPUSHBUTTON : BS_FLAT);
 		if (m_btnBoll.GetSafeHwnd()) m_btnBoll.Invalidate();
@@ -2204,14 +2219,28 @@ BOOL CFloatingWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	// 分时图模式/5分钟K线模式/日K线模式：滚轮缩放可见数据点数
 	if (m_viewMode != UI_VIEW_OVERVIEW)
 	{
-		const int minVisible = 30;   // 最大放大：显示40个数据点
+		int minVisible;              // 最大放大倍率：与"+"按钮一致
 		int maxVisible;              // 最小缩放上限：根据模式不同
 		if (m_viewMode == UI_VIEW_DAY_KLINE)
+		{
+			minVisible = TIME_LINE_VISIBLE_COUNT_1DAY;
 			maxVisible = 750;        // 日K线：最多显示约3年
-		else if (m_viewMode == UI_VIEW_MIN5_KLINE || m_viewMode == UI_VIEW_MIN30_KLINE)
-			maxVisible = 480;        // 5分/30分K线
+		}
+		else if (m_viewMode == UI_VIEW_MIN5_KLINE)
+		{
+			minVisible = TIME_LINE_VISIBLE_COUNT_5MIN;
+			maxVisible = 480;        // 5分K线
+		}
+		else if (m_viewMode == UI_VIEW_MIN30_KLINE)
+		{
+			minVisible = TIME_LINE_VISIBLE_COUNT_30MIN;
+			maxVisible = 480;        // 30分K线
+		}
 		else
+		{
+			minVisible = TIME_LINE_VISIBLE_COUNT_1MIN;
 			maxVisible = 240;        // 分时：1天240分钟
+		}
 		// 获取实际数据点数
 		int totalPoints = 0;
 		{
@@ -2249,7 +2278,7 @@ BOOL CFloatingWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 		int newCount = m_timelineVisibleCount;
 		if (zDelta > 0)
 		{
-			// 向上滚：放大（减少可见点数）
+			// 向上滚：放大（减少可见点数，逐步缩小，最终倍率与"+"按钮一致）
 			newCount = max(minVisible, m_timelineVisibleCount - TIME_LINE_VISIBLE_COUNT_STEP);
 		}
 		else
@@ -2412,12 +2441,7 @@ void CFloatingWnd::OnBnClickedKLineBtn()
 
 void CFloatingWnd::OnBnClickedIndicatorMACDSignalBtn()
 {
-	m_timelineIndicator = TimelineIndicator::MACD;
-	m_timelineMacdTitleTip.Empty();
-	m_timelineKdjTitleTip.Empty();
-	m_timelineWrTitleTip.Empty();
-	m_timelineRsiTitleTip.Empty();
-	Invalidate();
+	// MACD按钮仅展示信号颜色，不切换指标
 }
 
 void CFloatingWnd::OnBnClickedChipPeakBtn()
@@ -2518,6 +2542,7 @@ void CFloatingWnd::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 	COLORREF signalColor = CLR_INVALID;
 	bool isActive = false;  // 按钮是否为当前选中状态
 	if (nID == IDC_BOLL_BTN) { signalColor = m_bollSignalColor; isActive = m_showBollBands; }
+	else if (nID == IDC_MA_BTN) { signalColor = m_maSignalColor; isActive = m_showMA; }
 	else if (nID == IDC_INDICATOR_MACD_SIGNAL_BTN) { signalColor = m_macdSignalColor; isActive = (m_timelineIndicator == TimelineIndicator::MACD); }
 	else if (nID == IDC_INDICATOR_KDJ_BTN) { signalColor = m_kdjSignalColor; isActive = (m_timelineIndicator == TimelineIndicator::KDJ); }
 	else if (nID == IDC_INDICATOR_WR_BTN) { signalColor = m_wrSignalColor; isActive = (m_timelineIndicator == TimelineIndicator::WR); }
@@ -2573,19 +2598,20 @@ void CFloatingWnd::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 	dc.Detach();
 }
 
-void CFloatingWnd::ApplySignalColors(COLORREF bollColor, COLORREF macdColor, COLORREF kdjColor, COLORREF wrColor, COLORREF rsiColor)
+void CFloatingWnd::ApplySignalColors(COLORREF bollColor, COLORREF macdColor, COLORREF kdjColor, COLORREF wrColor, COLORREF rsiColor, COLORREF maColor)
 {
 	auto updateColor = [](COLORREF& storedColor, COLORREF newColor, CButton& btn) {
 		if (storedColor == newColor) return;
 		storedColor = newColor;
 		if (btn.GetSafeHwnd())
 			btn.Invalidate();
-	};
+		};
 	updateColor(m_bollSignalColor, bollColor, m_btnBoll);
 	updateColor(m_macdSignalColor, macdColor, m_btnIndicatorMACD);
 	updateColor(m_kdjSignalColor, kdjColor, m_btnIndicatorKDJ);
 	updateColor(m_wrSignalColor, wrColor, m_btnIndicatorWR);
 	updateColor(m_rsiSignalColor, rsiColor, m_btnIndicatorRSI);
+	updateColor(m_maSignalColor, maColor, m_btnMA);
 }
 
 void CFloatingWnd::EnsureChipPeakData()
@@ -2693,7 +2719,7 @@ void CFloatingWnd::OnBnClickedMABtn()
 		m_showBollBands = false;
 		m_btnBoll.SetWindowText(_T("BL"));
 	}
-	SafeSetButtonStyle(m_btnMA, m_showMA ? BS_DEFPUSHBUTTON : BS_FLAT);
+	if (m_btnMA.GetSafeHwnd()) m_btnMA.Invalidate();
 	if (m_btnBoll.GetSafeHwnd()) m_btnBoll.Invalidate();
 	Invalidate();
 }
@@ -2742,15 +2768,54 @@ void CFloatingWnd::OnBnClickedBollBtn()
 		m_showMA = false;
 	m_btnBoll.SetWindowText(_T("BL"));
 	if (m_btnBoll.GetSafeHwnd()) m_btnBoll.Invalidate();
-	SafeSetButtonStyle(m_btnMA, m_showMA ? BS_DEFPUSHBUTTON : BS_FLAT);
+	if (m_btnMA.GetSafeHwnd()) m_btnMA.Invalidate();
 	Invalidate();
 }
 
 void CFloatingWnd::OnBnClickedZoomOutBtn()
 {
-	// 缩小：显示全部240分钟数据
-	m_timelineVisibleCount = 240;
-	m_timelineScrollOffset = 0;
+	// 缩小：先放大到最大（与"+"按钮一致），然后移动到今天最开的位置（左边第一根线为9:30）
+	if (m_viewMode == UI_VIEW_DAY_KLINE)
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;
+		m_timelineScrollOffset = 0;
+	}
+	else if (m_viewMode == UI_VIEW_MIN30_KLINE)
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_30MIN;
+		m_timelineScrollOffset = 0;
+	}
+	else if (m_viewMode == UI_VIEW_MIN5_KLINE)
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;
+		// 5分钟K线模式：找到当天第一根K线的索引作为scrollOffset
+		m_timelineScrollOffset = 0;
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = g_data.GetStockData(m_stock_id);
+		if (stockData)
+		{
+			auto min5KLineObj = stockData->getMin5KLineData();
+			if (min5KLineObj && !min5KLineObj->data.empty())
+			{
+				// 5分钟K线day格式为"YYYY-MM-DD HH:MM"，取最后一根的日期作为当天
+				const auto& klineData = min5KLineObj->data;
+				std::string todayDate = klineData.back().day.substr(0, 10);  // "YYYY-MM-DD"
+				for (size_t i = 0; i < klineData.size(); i++)
+				{
+					if (klineData[i].day.compare(0, 10, todayDate) == 0)
+					{
+						m_timelineScrollOffset = static_cast<int>(i);
+						break;
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
+		m_timelineScrollOffset = 0;  // 分时模式从9:30开始
+	}
 	Invalidate();
 }
 

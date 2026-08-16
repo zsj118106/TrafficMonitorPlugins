@@ -846,11 +846,38 @@ std::vector<STOCK::TimelinePoint> CStockDbManager::LoadFundNavCache(const std::w
 	return points;
 }
 
+// 过滤掉非交易时间的净值记录（防止非交易时段写入的脏数据被加载）
+// A股交易时段：9:30-11:30, 13:00-15:00
+static bool IsValidNavTime(const std::string& timeStr)
+{
+	if (timeStr.size() < 5) return false;
+	int hour = 0, minute = 0;
+	if (sscanf_s(timeStr.c_str(), "%d:%d", &hour, &minute) != 2) return false;
+	int minutes = hour * 60 + minute;
+	// 9:30-11:30
+	if (minutes >= 9 * 60 + 30 && minutes <= 11 * 60 + 30) return true;
+	// 13:00-15:00
+	if (minutes >= 13 * 60 && minutes <= 15 * 60) return true;
+	return false;
+}
+
+static std::vector<STOCK::TimelinePoint> FilterValidNavPoints(const std::vector<STOCK::TimelinePoint>& points)
+{
+	std::vector<STOCK::TimelinePoint> filtered;
+	filtered.reserve(points.size());
+	for (const auto& p : points)
+	{
+		if (IsValidNavTime(p.time))
+			filtered.push_back(p);
+	}
+	return filtered;
+}
+
 std::vector<STOCK::TimelinePoint> CStockDbManager::LoadLatestFundNavCache(const std::wstring& stockCode)
 {
 	std::string tradeDate = GetTodayDateString();
 	auto points = LoadFundNavCache(stockCode, tradeDate);
-	if (!points.empty()) return points;
+	if (!points.empty()) return FilterValidNavPoints(points);
 
 	// 今天没有缓存时，回退加载最近交易日的基金净值
 	if (m_db == nullptr) return points;
@@ -861,15 +888,16 @@ std::vector<STOCK::TimelinePoint> CStockDbManager::LoadLatestFundNavCache(const 
 	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
 	sqlite3_bind_text16(stmt, 2, stockCode.c_str(), -1, SQLITE_TRANSIENT);
 
+	std::vector<STOCK::TimelinePoint> rawPoints;
 	while (sqlite3_step(stmt) == SQLITE_ROW)
 	{
 		STOCK::TimelinePoint point;
 		const unsigned char* timeText = sqlite3_column_text(stmt, 0);
 		point.time = timeText ? reinterpret_cast<const char*>(timeText) : "";
 		point.iopv = sqlite3_column_double(stmt, 1);
-		points.push_back(point);
+		rawPoints.push_back(point);
 	}
 	sqlite3_finalize(stmt);
-	return points;
+	return FilterValidNavPoints(rawPoints);
 }
 
