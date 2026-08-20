@@ -775,13 +775,15 @@ AvgDiffStats CStockDbManager::LoadAvgDiffStats(const std::wstring& stockCode)
 	if (m_db == nullptr) return result;
 
 	std::string code(stockCode.begin(), stockCode.end());
+	std::string today = GetTodayDateString();
 
-	// 加载最近一条记录（按 update_time 降序），非交易时间重启可显示上次的最低/最高
-	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? ORDER BY update_time DESC LIMIT 1;";
+	// 只加载当天的记录，避免加载昨日数据导致重启后min/max被旧值污染
+	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? AND update_time = ? LIMIT 1;";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
 		sqlite3_bind_text(stmt, 1, code.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 2, today.c_str(), -1, SQLITE_TRANSIENT);
 		if (sqlite3_step(stmt) == SQLITE_ROW)
 		{
 			result.minVal = sqlite3_column_double(stmt, 0);

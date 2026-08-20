@@ -1077,8 +1077,10 @@ void CDataManager::CheckAndResetAvgDiffDaily()
 	if (m_avg_diff_last_date.empty())
 	{
 		m_avg_diff_last_date = dateStr;
-		// 首次启动时设置待重置，确保数据库加载的旧记录在交易时段开始后被清零
-		m_avg_diff_reset_pending = true;
+		// 首次启动时，如果已从数据库加载了今日的均幅数据，则不需要重置
+		// 只有跨天（日期变化）时才需要清零旧数据
+		if (m_avg_diff_stats.empty())
+			m_avg_diff_reset_pending = true;
 		return;
 	}
 

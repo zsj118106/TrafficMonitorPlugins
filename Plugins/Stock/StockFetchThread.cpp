@@ -539,6 +539,41 @@ void CStockFetchThread::Run()
 			continue;  // 执行完一个图表任务后立即检查下一个
 		}
 
+		// 2.5 其余基金净值（IOPV）定时获取：轮询每个基金，保证非关注基金也持续更新
+		// 关注基金由上面的 CHART_IOPV 高频获取，这里只负责剩余基金
+		if (CCommon::IsMarketSession())
+		{
+			bool doSweep = false;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (m_stopping.load())
+					return;
+				time_t now = time(nullptr);
+				if (now - m_all_fund_iopv_last_fetch >= ALL_FUND_IOPV_INTERVAL)
+				{
+					m_all_fund_iopv_last_fetch = now;
+					doSweep = true;
+				}
+			}
+			if (doSweep)
+			{
+				if (m_stopping.load())
+					return;
+				try
+				{
+					FetchAllFundsIOPV();
+				}
+				catch (CInternetException* e)
+				{
+					e->Delete();
+				}
+				catch (...)
+				{
+				}
+				continue;  // 立即检查下一个任务/到期项
+			}
+		}
+
 		// 3. 没有即时任务也没有到时的图表任务，计算等待时间
 		{
 			std::unique_lock<std::mutex> lock(m_mutex);
@@ -726,6 +761,34 @@ void CStockFetchThread::FetchFundIOPV(const std::wstring& code)
 	g_data.ApplyFundIOPV(code, resp, ok);
 }
 
+void CStockFetchThread::FetchAllFundsIOPV()
+{
+	// 收集所有基金代码，排除关注基金（关注基金由 CHART_IOPV 高频获取，这里只负责其余基金）
+	const auto& codes = g_data.m_setting_data.m_stock_codes;
+	std::wstring focusId = GetFocusStockId();
+	std::vector<std::wstring> fundCodes;
+	fundCodes.reserve(codes.size());
+	for (const auto& code : codes)
+	{
+		if (CCommon::IsFundCode(code) && code != focusId)
+			fundCodes.push_back(code);
+	}
+	if (fundCodes.empty())
+		return;
+
+	// 轮询取出本轮要获取的基金
+	std::wstring fundCode;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_all_fund_iopv_index >= fundCodes.size())
+			m_all_fund_iopv_index = 0;
+		fundCode = fundCodes[m_all_fund_iopv_index];
+		m_all_fund_iopv_index++;
+	}
+
+	FetchFundIOPV(fundCode);
+}
+
 void CStockFetchThread::FetchStockBasic(const std::wstring& code)
 {
 	STOCK::Volume shares = 0;
@@ -770,6 +833,8 @@ void CStockFetchThread::FetchAllData()
 			FetchMin5KLine(code, 250);
 		if (!g_data.HasKLineCache(code, STOCK::Period::MIN30))
 			FetchMin30KLine(code, 250);
+		if (CCommon::IsFundCode(code) )
+			FetchFundIOPV(code);
 		FetchStockBasic(code);
 		FetchChipDistribution(code);
 	}
@@ -778,8 +843,6 @@ void CStockFetchThread::FetchAllData()
 	std::wstring focusId = GetFocusStockId();
 	if (!focusId.empty())
 	{
-		FetchTimeline(focusId);
-		if (CCommon::IsFundCode(focusId) && CCommon::IsMarketSession())
-			FetchFundIOPV(focusId);
+		FetchTimeline(focusId);		
 	}
 }

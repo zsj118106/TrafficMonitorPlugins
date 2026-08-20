@@ -203,7 +203,11 @@ void STOCK::StockData::UpdateOrderBookCumVol(Price prevAsk1, Price prevBid1)
 				orderBookCumVolMap[price] = { price, 0, isAskSide };
 				cumIt = orderBookCumVolMap.find(price);
 			}
-			cumIt->second.cumVolume += (-delta) / 100;  // 股转手
+
+			if (price == info.currentPrice)
+			{
+				cumIt->second.cumVolume += (-delta) / 100;  // 股转手
+			}
 		}
 	}
 

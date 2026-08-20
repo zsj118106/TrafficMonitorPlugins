@@ -670,7 +670,6 @@ void CFloatingWnd::OnPaint()
 			tlHover.timelineKdjTitleTip = m_timelineKdjTitleTip;
 			tlHover.timelineWrTitleTip = m_timelineWrTitleTip;
 			tlHover.timelineRsiTitleTip = m_timelineRsiTitleTip;
-			tlHover.showJZCurve = m_showJZCurve;
 			tlHover.showMA = m_showMA;
 			tlHover.showBollBands = m_showBollBands;
 			tlHover.showTrendView = m_showTrendView;
@@ -926,7 +925,6 @@ void CFloatingWnd::OnPaint()
 			tlHover.timelineKdjTitleTip = m_timelineKdjTitleTip;
 			tlHover.timelineWrTitleTip = m_timelineWrTitleTip;
 			tlHover.timelineRsiTitleTip = m_timelineRsiTitleTip;
-			tlHover.showJZCurve = m_showJZCurve;
 			tlHover.showMA = m_showMA;
 			tlHover.showBollBands = m_showBollBands;
 			tlHover.showTrendView = m_showTrendView;

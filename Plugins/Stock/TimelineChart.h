@@ -24,7 +24,6 @@ public:
 		CString timelineKdjTitleTip;
 		CString timelineWrTitleTip;
 		CString timelineRsiTitleTip;
-		bool showJZCurve{ false };
 		bool showMA{ false };
 		bool showBollBands{ true };
 		bool showTrendView{ false };

@@ -98,6 +98,12 @@ private:
 	// 各图表数据类型的上次获取时间
 	time_t m_chart_last_fetch[4] = {};  // IOPV, Timeline, Min5KLine, Min30KLine
 
+	// 其余基金净值（IOPV）定时获取：轮询每个非关注基金代码，保证所有基金持续更新
+	time_t m_all_fund_iopv_last_fetch = 0;  // 上次执行全基金轮询的时间
+	size_t m_all_fund_iopv_index = 0;       // 本轮待获取的基金下标（轮询）
+	static const time_t ALL_FUND_IOPV_INTERVAL = 3;  // 每次轮询间隔（秒）
+	void FetchAllFundsIOPV();               // 获取下一个非关注基金的IOPV
+
 	// 实时行情定时获取
 	time_t m_realtime_last_fetch = 0;	// 上次获取实时行情的时间
 	static const time_t REALTIME_INTERVAL_TRADING = 2;	// 盘中实时行情间隔（秒）
