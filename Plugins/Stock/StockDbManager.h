@@ -42,6 +42,16 @@ public:
 		double price, double amount, double totalAmount,
 		double fee, double total);
 
+	// 交易明细（一档行情逐笔成交）
+	// 批量插入，写前会先按 (code, trade_date) 删除同日旧数据，保证幂等覆盖
+	bool SaveTransactions(const std::wstring& stockCode, const std::string& tradeDate,
+		const std::vector<STOCK::Transaction>& data);
+	// 按 (code, trade_date) 删除
+	bool DeleteTransactions(const std::wstring& stockCode, const std::string& tradeDate);
+	// 按 code + trade_date 批量查询（按插入顺序，即时间先后返回）
+	std::vector<STOCK::Transaction> LoadTransactions(const std::wstring& stockCode,
+		const std::string& tradeDate);
+
 	// 内外盘快照
 	bool SaveInnerOuterSnapshot(const std::wstring& stockCode, time_t timestamp,
 		STOCK::Volume innerVolume, STOCK::Volume outerVolume);

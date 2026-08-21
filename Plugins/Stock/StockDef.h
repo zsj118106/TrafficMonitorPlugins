@@ -55,6 +55,19 @@ namespace STOCK
 		TimelinePoint() : volume(0), price(0), openPrice(0), averagePrice(0), amount(0), ma5(0), ma10(0), ma20(0), iopv(0) {}
 	};
 
+	// 交易明细点（一档行情逐笔成交）
+	struct Transaction
+	{
+		std::string timeKey;   // 接口返回时间 HH:MM（无秒）
+		Price price{ 0.0 };    // 成交价格
+		Volume vol{ 0 };       // 成交量（手）
+		int buyOrSell{ 0 };    // 1=B买，0=S卖，2=中性
+
+		Transaction() = default;
+		Transaction(std::string tk, Price p, Volume v, int b)
+			: timeKey(tk), price(p), vol(v), buyOrSell(b) {}
+	};
+
 	// 筹码分布数据点
 	struct ChipPoint
 	{

@@ -115,6 +115,9 @@ bool CStockDbManager::Init(const std::wstring& config_path)
 		return false;
 	}
 
+	// 启用 WAL 日志模式，提升读写并发性能（读不阻塞写，写不阻塞读）
+	sqlite3_exec(m_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+
 	// 创建交易记录表
 	const char* sql = "CREATE TABLE IF NOT EXISTS trades ("
 		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -232,15 +235,44 @@ bool CStockDbManager::Init(const std::wstring& config_path)
 	if (rc != SQLITE_OK) sqlite3_free(errMsg);
 
 	// 关联股票均幅统计表
+	// 按 (stock_code, trade_date) 唯一定位当天记录，保证重启后能可靠加载“当天”的最小/最大值
+	// 旧表仅以 stock_code 为主键（无 trade_date 列），跨天会被覆盖，需迁移重建（仅在旧schema时执行）
+	auto hasTradeDateColumn = [&]() -> bool {
+		std::string sql = "PRAGMA table_info(avg_diff_stats);";
+		sqlite3_stmt* stmt = nullptr;
+		bool found = false;
+		if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK)
+		{
+			while (sqlite3_step(stmt) == SQLITE_ROW)
+			{
+				const unsigned char* name = sqlite3_column_text(stmt, 1);
+				if (name && strcmp(reinterpret_cast<const char*>(name), "trade_date") == 0)
+				{
+					found = true;
+					break;
+				}
+			}
+		}
+		sqlite3_finalize(stmt);
+		return found;
+	};
+
+	if (!hasTradeDateColumn())
+	{
+		errMsg = nullptr;
+		sqlite3_exec(m_db, "DROP TABLE IF EXISTS avg_diff_stats;", nullptr, nullptr, &errMsg);
+		if (errMsg) { sqlite3_free(errMsg); errMsg = nullptr; }
+	}
+	errMsg = nullptr;
 	const char* avgDiffStatsSql = "CREATE TABLE IF NOT EXISTS avg_diff_stats ("
 		"stock_code TEXT NOT NULL,"
+		"trade_date TEXT NOT NULL,"
 		"min_avg_diff REAL NOT NULL,"
 		"max_avg_diff REAL NOT NULL,"
 		"current_avg_diff REAL NOT NULL,"
 		"update_time TEXT NOT NULL,"
-		"PRIMARY KEY (stock_code)"
+		"PRIMARY KEY (stock_code, trade_date)"
 		");";
-	errMsg = nullptr;
 	rc = sqlite3_exec(m_db, avgDiffStatsSql, nullptr, nullptr, &errMsg);
 	if (rc != SQLITE_OK) sqlite3_free(errMsg);
 
@@ -257,6 +289,21 @@ bool CStockDbManager::Init(const std::wstring& config_path)
 	rc = sqlite3_exec(m_db, fundNavSql, nullptr, nullptr, &errMsg);
 	if (rc != SQLITE_OK) sqlite3_free(errMsg);
 
+	// 交易明细表，存放一档行情逐笔成交数据
+	// trade_date 由业务层填入，避免跨天混淆；time_key 为接口返回的 HH:MM（无秒）
+	const char* transactionSql = "CREATE TABLE IF NOT EXISTS transaction ("
+		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
+		"code TEXT NOT NULL,"
+		"trade_date TEXT NOT NULL,"
+		"time_key TEXT NOT NULL,"
+		"price REAL NOT NULL,"
+		"vol INTEGER NOT NULL,"
+		"buyorsell INTEGER NOT NULL"
+		");";
+	errMsg = nullptr;
+	rc = sqlite3_exec(m_db, transactionSql, nullptr, nullptr, &errMsg);
+	if (rc != SQLITE_OK) sqlite3_free(errMsg);
+
 	return true;
 }
 
@@ -264,6 +311,8 @@ void CStockDbManager::Close()
 {
 	if (m_db != nullptr)
 	{
+		// WAL 模式下先主动 checkpoint，把 WAL 日志合并回主库文件
+		sqlite3_exec(m_db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
 		sqlite3_close(m_db);
 		m_db = nullptr;
 	}
@@ -752,17 +801,18 @@ bool CStockDbManager::SaveAvgDiffStats(const std::wstring& stockCode, double min
 	if (m_db == nullptr) return false;
 
 	std::string code(stockCode.begin(), stockCode.end());
-	std::string updateTime = GetTodayDateString();
+	std::string dateStr = GetTodayDateString();
 
-	const char* sql = "INSERT OR REPLACE INTO avg_diff_stats (stock_code, min_avg_diff, max_avg_diff, current_avg_diff, update_time) VALUES (?, ?, ?, ?, ?);";
+	const char* sql = "INSERT OR REPLACE INTO avg_diff_stats (stock_code, trade_date, min_avg_diff, max_avg_diff, current_avg_diff, update_time) VALUES (?, ?, ?, ?, ?, ?);";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
 		sqlite3_bind_text(stmt, 1, code.c_str(), -1, SQLITE_TRANSIENT);
-		sqlite3_bind_double(stmt, 2, minVal);
-		sqlite3_bind_double(stmt, 3, maxVal);
-		sqlite3_bind_double(stmt, 4, currentVal);
-		sqlite3_bind_text(stmt, 5, updateTime.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 2, dateStr.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_double(stmt, 3, minVal);
+		sqlite3_bind_double(stmt, 4, maxVal);
+		sqlite3_bind_double(stmt, 5, currentVal);
+		sqlite3_bind_text(stmt, 6, dateStr.c_str(), -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 	}
 	sqlite3_finalize(stmt);
@@ -778,7 +828,7 @@ AvgDiffStats CStockDbManager::LoadAvgDiffStats(const std::wstring& stockCode)
 	std::string today = GetTodayDateString();
 
 	// 只加载当天的记录，避免加载昨日数据导致重启后min/max被旧值污染
-	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? AND update_time = ? LIMIT 1;";
+	const char* sql = "SELECT min_avg_diff, max_avg_diff, current_avg_diff FROM avg_diff_stats WHERE stock_code = ? AND trade_date = ? LIMIT 1;";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK)
 	{
@@ -901,5 +951,81 @@ std::vector<STOCK::TimelinePoint> CStockDbManager::LoadLatestFundNavCache(const 
 	}
 	sqlite3_finalize(stmt);
 	return FilterValidNavPoints(rawPoints);
+}
+
+bool CStockDbManager::SaveTransactions(const std::wstring& stockCode,
+	const std::string& tradeDate, const std::vector<STOCK::Transaction>& data)
+{
+	if (m_db == nullptr || data.empty()) return false;
+
+	// 先删除同一天同一股票的历史明细，避免重复累加（同一天数据是幂等覆盖的）
+	if (!DeleteTransactions(stockCode, tradeDate)) return false;
+
+	const char* sql = "INSERT INTO transaction(code, trade_date, time_key, price, vol, buyorsell) VALUES(?, ?, ?, ?, ?, ?);";
+	sqlite3_stmt* stmt = nullptr;
+	int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+	if (rc != SQLITE_OK) return false;
+
+	bool ok = true;
+	for (const auto& item : data)
+	{
+		if (item.timeKey.empty()) continue;
+		sqlite3_reset(stmt);
+		sqlite3_clear_bindings(stmt);
+		sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 2, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 3, item.timeKey.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_double(stmt, 4, item.price);
+		sqlite3_bind_int64(stmt, 5, static_cast<sqlite3_int64>(item.vol));
+		sqlite3_bind_int(stmt, 6, item.buyOrSell);
+		rc = sqlite3_step(stmt);
+		if (rc != SQLITE_DONE)
+			ok = false;
+	}
+	sqlite3_finalize(stmt);
+	return ok;
+}
+
+bool CStockDbManager::DeleteTransactions(const std::wstring& stockCode, const std::string& tradeDate)
+{
+	if (m_db == nullptr) return false;
+
+	const char* sql = "DELETE FROM transaction WHERE code = ? AND trade_date = ?;";
+	sqlite3_stmt* stmt = nullptr;
+	int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+	if (rc != SQLITE_OK) return false;
+
+	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text(stmt, 2, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
+	rc = sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
+	return rc == SQLITE_DONE;
+}
+
+std::vector<STOCK::Transaction> CStockDbManager::LoadTransactions(const std::wstring& stockCode,
+	const std::string& tradeDate)
+{
+	std::vector<STOCK::Transaction> result;
+	if (m_db == nullptr) return result;
+
+	const char* sql = "SELECT time_key, price, vol, buyorsell FROM transaction "
+		"WHERE code = ? AND trade_date = ? ORDER BY id ASC;";
+	sqlite3_stmt* stmt = nullptr;
+	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text(stmt, 2, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
+
+	while (sqlite3_step(stmt) == SQLITE_ROW)
+	{
+		STOCK::Transaction item;
+		const unsigned char* timeText = sqlite3_column_text(stmt, 0);
+		item.timeKey = timeText ? reinterpret_cast<const char*>(timeText) : "";
+		item.price = sqlite3_column_double(stmt, 1);
+		item.vol = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
+		item.buyOrSell = sqlite3_column_int(stmt, 3);
+		result.push_back(std::move(item));
+	}
+	sqlite3_finalize(stmt);
+	return result;
 }
 

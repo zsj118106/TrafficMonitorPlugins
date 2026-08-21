@@ -1103,6 +1103,9 @@ void CDataManager::CheckAndResetAvgDiffDaily()
 
 void CDataManager::UpdateRelatedStocksAvgDiff()
 {
+	// 每次行情更新都触发跨天检查，保证运行中跨天时在交易时段清空昨日数据
+	CheckAndResetAvgDiffDaily();
+
 	// 遍历所有配置了关联股票的股票，计算并更新均幅统计
 	for (const auto& item : m_stock_related)
 	{
@@ -1169,10 +1172,11 @@ void CDataManager::UpdateRelatedStocksAvgDiff()
 			PushAvgDiffHistory(stockId, avgDiffPercent);
 		}
 
-		// 每分钟保存最低/最高均幅到数据库（仅交易时段，避免非交易时间用昨日数据污染今日记录）
-		static time_t lastSaveTime = 0;
+		// 每分钟保存最低/最高均幅到数据库（交易时段或全天模式；跨天污染由每日重置兜底）
+		// 注意：用按股票的时间戳，避免函数级static被多只股票共享导致只有第一只被写库
 		time_t now = time(nullptr);
-		if (now - lastSaveTime >= 60 && CCommon::IsMarketSession())
+		time_t& lastSaveTime = m_avg_diff_last_save_time[stockId];
+		if (now - lastSaveTime >= 60 && (CCommon::IsMarketSession() || m_setting_data.m_full_day == 1))
 		{
 			lastSaveTime = now;
 			SaveAvgDiffStatsDb(stockId);

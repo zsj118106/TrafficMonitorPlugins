@@ -380,10 +380,10 @@ void CFloatingWnd::OnPaint()
 	const int headerHeight = g_data.RDPI(26);
 	const int xAxisLabelHeight = g_data.RDPI(20);
 	const int singleBarHeight = g_data.RDPI(20);  // 单行状态栏高度
-	const int relatedBarHeight = singleBarHeight;  // 管理股票栏高度（1行，位于标题栏下方）
+	const int relatedBarHeight = singleBarHeight;  // 关联股票栏高度（1行，位于标题栏下方）
 	const int indexBarHeight = singleBarHeight;    // 底部系统状态栏高度（1行）
 
-	// 统一布局：标题栏 + 管理股票栏 + 走势图(2/5) + 成交量(1/5) + MACD(1/5) + KDJ(1/5) + 时间标签 + 底部系统状态栏
+	// 统一布局：标题栏 + 关联股票栏 + 走势图(2/5) + 成交量(1/5) + MACD(1/5) + KDJ(1/5) + 时间标签 + 底部系统状态栏
 	int chartArea = h - headerHeight - relatedBarHeight - xAxisLabelHeight - indexBarHeight;
 	int priceChartHeight, macdChartHeight, kdjChartHeight, volumeChartHeight;
 	if (m_expandedMode)
@@ -1081,7 +1081,7 @@ void CFloatingWnd::OnPaint()
 			memDC.TextOut((chartWidth - memDC.GetTextExtent(loading_state_txt).cx) / 2, headerHeight + g_data.RDPI(10), loading_state_txt);
 		}
 
-		// 绘制管理股票栏（标题栏下方）
+		// 绘制关联股票栏（标题栏下方）
 		{
 			int relatedBarY = headerHeight;
 			memDC.FillSolidRect(0, relatedBarY, w, relatedBarHeight, RGB(240, 240, 240));
@@ -1231,7 +1231,7 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 	{
 		const int stockListWidth = g_data.RDPI(65);
 		const int headerHeight = g_data.RDPI(26);
-		const int relatedBarHeight = g_data.RDPI(20);  // 管理股票栏高度
+		const int relatedBarHeight = g_data.RDPI(20);  // 关联股票栏高度
 		const int titleH = g_data.RDPI(16);
 		const int rowHeight = g_data.RDPI(35);
 		const int listTop = headerHeight + relatedBarHeight + titleH + g_data.RDPI(2);
@@ -1328,7 +1328,7 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 		const int orderBookWidth = isIndexKLine ? 0 : ORDER_BOOK_WIDTH;
 		const int chartWidth = rect.Width() - orderBookWidth;
 		const int headerHeight = g_data.RDPI(26);
-		const int relatedBarHeight = g_data.RDPI(20);  // 管理股票栏高度
+		const int relatedBarHeight = g_data.RDPI(20);  // 关联股票栏高度
 
 		const int yAxisWidth = g_data.RDPI(50);
 		const int stockListWidth = m_showStockList ? g_data.RDPI(65) : 0;
@@ -1455,7 +1455,7 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 		const int dragYAxisWidth = g_data.RDPI(50);
 		const int dragStockListWidth = m_showStockList ? g_data.RDPI(65) : 0;
 		const int dragChartLeft = dragStockListWidth + dragYAxisWidth;
-		const int dragHeaderHeight = g_data.RDPI(26) + g_data.RDPI(20);  // 标题栏+管理股票栏
+		const int dragHeaderHeight = g_data.RDPI(26) + g_data.RDPI(20);  // 标题栏+关联股票栏
 		if (m_viewMode != UI_VIEW_OVERVIEW && point.x >= dragChartLeft && point.x < dragChartWidth && point.y >= dragHeaderHeight)
 		{
 			// 分时图拖动（5分钟K线模式和日K线模式也使用分时拖动逻辑）
@@ -1676,10 +1676,10 @@ void CFloatingWnd::OnMouseMove(UINT nFlags, CPoint point)
 	const int headerHeight = g_data.RDPI(26);
 	const int xAxisLabelHeight = g_data.RDPI(20);
 	const int singleBarHeight = g_data.RDPI(20);
-	const int relatedBarHeight = singleBarHeight;  // 管理股票栏高度（1行，位于标题栏下方）
+	const int relatedBarHeight = singleBarHeight;  // 关联股票栏高度（1行，位于标题栏下方）
 	const int indexBarHeight = singleBarHeight;    // 底部系统状态栏高度（1行）
 
-	// 统一布局：标题栏 + 管理股票栏 + 走势图(2/5) + 成交量(1/5) + MACD(1/5) + KDJ(1/5) + 时间标签 + 底部系统状态栏
+	// 统一布局：标题栏 + 关联股票栏 + 走势图(2/5) + 成交量(1/5) + MACD(1/5) + KDJ(1/5) + 时间标签 + 底部系统状态栏
 	int chartArea = rect.Height() - headerHeight - relatedBarHeight - xAxisLabelHeight - indexBarHeight;
 	int priceChartHeight = chartArea * 2 / 5;
 	int volumeChartHeight = chartArea / 5;

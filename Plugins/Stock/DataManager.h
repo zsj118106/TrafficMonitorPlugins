@@ -182,6 +182,9 @@ private:
 	// 每个股票的上次采样时间戳，避免static变量导致多股票共享同一时间戳
 	std::map<std::wstring, time_t> m_avg_diff_last_sample_time;
 
+	// 每个股票的上次写库时间戳（每分钟保存一次，同样不能是函数级static，否则多股票互相干扰）
+	std::map<std::wstring, time_t> m_avg_diff_last_save_time;
+
 	// 每日重置跟踪：记录上次更新日期，跨天时标记待重置
 	std::string m_avg_diff_last_date;
 	bool m_avg_diff_reset_pending{ false };  // 跨天待重置标识，等交易时段获取到今日数据后才执行
