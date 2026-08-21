@@ -21,6 +21,15 @@ public:
 		const std::vector<STOCK::KLinePoint>& klineData,
 		UIViewMode viewMode);
 
+	// 原始版盘口绘制（18行，含委比/趋势/净比/振幅/换手率），留作与新精简版对比，不参与实际调用
+	void DrawBackup(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
+		const std::vector<STOCK::KLinePoint>& klineData,
+		UIViewMode viewMode);
+
+	// 绘制成交明细界面（MX模式）：显示最近20条成交，每隔2秒从数据库刷新
+	// left,right: 面板左右边界；height: 面板总高度（含盘口标题栏）
+	void DrawTickDetail(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo);
+
 private:
 	// 盘口行数据
 	struct OrderBookRow
@@ -97,6 +106,18 @@ private:
 	// 绘制换手率（行17）
 	void DrawTurnoverRate(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
+	// ===== 精简版盘口（新版Draw）用到的子项 =====
+	// 绘制最高/最低行
+	void DrawHighLow(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
+	// 绘制选线分割（净比00柱状图，barY为绘制行的Y坐标）
+	void DrawNetRatio00Ex(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, int barY);
+	// 绘制净流入汇总行（label在左、金额右对齐，正红负绿）
+	void DrawNetInflowRow(CDC& memDC, const LayoutContext& lc, int rowIndex, const CString& label, double netInflow);
+	// 绘制行明细（从startRow开始，最多10行，最新在下）
+	void DrawTickMini(CDC& memDC, const LayoutContext& lc, int startRow);
+	// 刷新行明细缓存（limit条）并计算整日累计净流入
+	void RefreshTickMini(const STOCK::StockInfo& stockInfo, int limit);
+
 	// 辅助：绘制单行盘口文本（含小号后缀、右对齐后缀）
 	void DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, int x, int y, int rowWidth, bool blinkOff = false);
 
@@ -109,11 +130,17 @@ private:
 	// 辅助：获取净比颜色索引（0=0~30, 1=30~60, 2=60+）
 	static int GetNetRatioColorIndex(double ratio);
 
-	// 辅助：获取买一/卖一挂单瞬时变化量
-	STOCK::Volume GetOrderDeltaLots(STOCK::Price price);
+	// 辅助：获取卖一/买一后方累计主动成交量的瞬时变化量（手）
+	// isAskSide=true(卖一)返回累计主动买变化量，isAskSide=false(买一)返回累计主动卖变化量
+	STOCK::Volume GetOrderDeltaLots(STOCK::Price price, bool isAskSide) const;
 
 	// 辅助：获取盘口累计成交量（手）
-	STOCK::Volume GetOrderBookCumVol(STOCK::Price price) const;
+	// isAskSide=true(卖盘)返回该价格的主动买累计量，isAskSide=false(买盘)返回主动卖累计量
+	STOCK::Volume GetOrderBookCumVol(STOCK::Price price, bool isAskSide) const;
+
+	// 辅助：每隔5秒从数据库 tick_trade 聚合刷新各价格档位的真实累计成交量
+	// ETF 的成交价格在DB中被Python放大了10倍，此处除以10还原，使key与真实盘口价格一致
+	void RefreshPriceCumVol(const STOCK::StockInfo& stockInfo);
 
 	// 辅助：计算净比趋势箭头
 	static CString CalcNetRatioTrend(double ratio, double previousRatio);
@@ -137,6 +164,31 @@ private:
 	// 净比1/5/10/20趋势缓存
 	static std::map<std::wstring, std::map<int, double>> m_lastPeriodRatioMap;
 	static std::map<std::wstring, std::map<int, CString>> m_lastPeriodRatioTrendMap;
-	// 挂单量累加缓存（每次Draw调用期间有效）
-	std::shared_ptr<STOCK::StockData> m_stockDataForAccum;
+
+	// 各价格档位的真实累计成交量（来自数据库 tick_trade 聚合）
+	// key 为价格量化到0.0001精度后的整数，避免浮点相等比较误差
+	struct PriceCumVol
+	{
+		STOCK::Volume activeBuyVol{ 0 };   // 主动买(buyOrSell=0)累计手
+		STOCK::Volume activeSellVol{ 0 };  // 主动卖(buyOrSell=1)累计手
+	};
+	std::map<long long, PriceCumVol> m_priceCumVolMap;   // 当前累计成交量
+	std::map<long long, PriceCumVol> m_priceCumVolPrev;  // 上次采样的累计成交量（用于算瞬时变化）
+	std::wstring m_priceCumVolCode;   // 当前已加载累计成交量的股票代码
+	DWORD m_lastCumVolRefreshTick{ 0 };  // 上次刷新累计成交量的时机(ms)
+
+	// 成交明细缓存（MX模式，最近20条）
+	std::vector<STOCK::Transaction> m_tickDetails;
+	std::wstring m_tickDetailCode;   // 当前已加载明细的股票代码
+	DWORD m_lastTickRefreshTick{ 0 };  // 上次刷新明细的时机(ms)
+	double m_cumNetInflow{ 0.0 };      // 整日累计净流入额（元）
+	double m_intervalNetInflow{ 0.0 }; // 区间（当前10条）净流入额（元）
+
+	// 精简版盘口内嵌的10行明细缓存（与MX模式的DrawTickDetail独立刷新）
+	std::vector<STOCK::Transaction> m_tickMiniDetails;
+	std::wstring m_tickMiniCode;
+	DWORD m_lastTickMiniRefreshTick{ 0 };
+
+	// 精简版盘口：整个面板已按行高缩小字体，避免后缀再次*3/4造成双重缩小
+	bool m_compactMode{ false };
 };

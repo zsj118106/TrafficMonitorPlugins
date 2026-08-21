@@ -291,7 +291,7 @@ bool CStockDbManager::Init(const std::wstring& config_path)
 
 	// 交易明细表，存放一档行情逐笔成交数据
 	// trade_date 由业务层填入，避免跨天混淆；time_key 为接口返回的 HH:MM（无秒）
-	const char* transactionSql = "CREATE TABLE IF NOT EXISTS transaction ("
+	const char* transactionSql = "CREATE TABLE IF NOT EXISTS tick_trade ("
 		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
 		"code TEXT NOT NULL,"
 		"trade_date TEXT NOT NULL,"
@@ -961,7 +961,7 @@ bool CStockDbManager::SaveTransactions(const std::wstring& stockCode,
 	// 先删除同一天同一股票的历史明细，避免重复累加（同一天数据是幂等覆盖的）
 	if (!DeleteTransactions(stockCode, tradeDate)) return false;
 
-	const char* sql = "INSERT INTO transaction(code, trade_date, time_key, price, vol, buyorsell) VALUES(?, ?, ?, ?, ?, ?);";
+	const char* sql = "INSERT INTO tick_trade(code, trade_date, time_key, price, vol, buyorsell) VALUES(?, ?, ?, ?, ?, ?);";
 	sqlite3_stmt* stmt = nullptr;
 	int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
 	if (rc != SQLITE_OK) return false;
@@ -990,7 +990,7 @@ bool CStockDbManager::DeleteTransactions(const std::wstring& stockCode, const st
 {
 	if (m_db == nullptr) return false;
 
-	const char* sql = "DELETE FROM transaction WHERE code = ? AND trade_date = ?;";
+	const char* sql = "DELETE FROM tick_trade WHERE code = ? AND trade_date = ?;";
 	sqlite3_stmt* stmt = nullptr;
 	int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
 	if (rc != SQLITE_OK) return false;
@@ -1008,7 +1008,7 @@ std::vector<STOCK::Transaction> CStockDbManager::LoadTransactions(const std::wst
 	std::vector<STOCK::Transaction> result;
 	if (m_db == nullptr) return result;
 
-	const char* sql = "SELECT time_key, price, vol, buyorsell FROM transaction "
+	const char* sql = "SELECT time_key, price, vol, buyorsell FROM tick_trade "
 		"WHERE code = ? AND trade_date = ? ORDER BY id ASC;";
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
@@ -1024,6 +1024,72 @@ std::vector<STOCK::Transaction> CStockDbManager::LoadTransactions(const std::wst
 		item.vol = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
 		item.buyOrSell = sqlite3_column_int(stmt, 3);
 		result.push_back(std::move(item));
+	}
+	sqlite3_finalize(stmt);
+	return result;
+}
+
+std::vector<STOCK::Transaction> CStockDbManager::LoadLatestTransactions(const std::wstring& stockCode, int limit)
+{
+	std::vector<STOCK::Transaction> result;
+	if (m_db == nullptr || limit <= 0) return result;
+
+	// 按自增id倒序取最新N条；只取主动买(0)/主动卖(1)，排除中性(2)、集合竞价(5)、尾盘定价(8)
+	const char* sql = "SELECT time_key, price, vol, buyorsell FROM tick_trade "
+		"WHERE code = ? AND buyorsell IN (0,1) ORDER BY id DESC LIMIT ?;";
+	sqlite3_stmt* stmt = nullptr;
+	if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+	sqlite3_bind_int(stmt, 2, limit);
+
+	while (sqlite3_step(stmt) == SQLITE_ROW)
+	{
+		STOCK::Transaction item;
+		const unsigned char* timeText = sqlite3_column_text(stmt, 0);
+		item.timeKey = timeText ? reinterpret_cast<const char*>(timeText) : "";
+		item.price = sqlite3_column_double(stmt, 1);
+		item.vol = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
+		item.buyOrSell = sqlite3_column_int(stmt, 3);
+		result.push_back(std::move(item));
+	}
+	sqlite3_finalize(stmt);
+	return result;	// 已按id倒序，最新在前
+}
+
+std::vector<STOCK::PriceVolumeStat> CStockDbManager::LoadPriceVolumeStats(const std::wstring& stockCode,
+	const std::string& tradeDate, int buyOrSell)
+{
+	std::vector<STOCK::PriceVolumeStat> result;
+	if (m_db == nullptr) return result;
+
+	std::string sql = "SELECT price, buyorsell, SUM(vol) FROM tick_trade "
+		"WHERE code = ? AND trade_date = ?";
+	if (buyOrSell == 0 || buyOrSell == 1)
+	{
+		// 指定具体方向（0=S卖 或 1=B买）
+		sql += " AND buyorsell = ?";
+	}
+	else
+	{
+		// 默认只统计买卖两个方向(0,1)，排除中性(2)等其它值
+		sql += " AND buyorsell IN (0,1)";
+	}
+	sql += " GROUP BY price, buyorsell ORDER BY price ASC, buyorsell ASC;";
+
+	sqlite3_stmt* stmt = nullptr;
+	if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) return result;
+	sqlite3_bind_text16(stmt, 1, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text(stmt, 2, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
+	if (buyOrSell == 0 || buyOrSell == 1)
+		sqlite3_bind_int(stmt, 3, buyOrSell);
+
+	while (sqlite3_step(stmt) == SQLITE_ROW)
+	{
+		STOCK::PriceVolumeStat stat;
+		stat.price = sqlite3_column_double(stmt, 0);
+		stat.buyOrSell = sqlite3_column_int(stmt, 1);
+		stat.vol = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
+		result.push_back(std::move(stat));
 	}
 	sqlite3_finalize(stmt);
 	return result;

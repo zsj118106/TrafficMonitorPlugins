@@ -104,7 +104,8 @@ enum {
 	IDC_EXPAND_BTN = 1020,
 	IDC_TOGGLE_STOCK_LIST_BTN = 1021,
 	IDC_CALL_AUCTION_BTN = 1022,
-	IDC_REFRESH_TIMER = 1023
+	IDC_REFRESH_TIMER = 1023,
+	IDC_TICK_DETAIL_BTN = 1024
 };
 
 BEGIN_MESSAGE_MAP(CFloatingWnd, CWnd)
@@ -141,6 +142,7 @@ BEGIN_MESSAGE_MAP(CFloatingWnd, CWnd)
 	ON_BN_CLICKED(IDC_INDICATOR_RSI_BTN, &CFloatingWnd::OnBnClickedIndicatorRSIBtn)
 	ON_BN_CLICKED(IDC_CHIP_PEAK_BTN, &CFloatingWnd::OnBnClickedChipPeakBtn)
 	ON_BN_CLICKED(IDC_ORDER_BOOK_BTN, &CFloatingWnd::OnBnClickedOrderBookBtn)
+	ON_BN_CLICKED(IDC_TICK_DETAIL_BTN, &CFloatingWnd::OnBnClickedTickDetailBtn)
 	ON_BN_CLICKED(IDC_EXPAND_BTN, &CFloatingWnd::OnBnClickedExpandBtn)
 	ON_BN_CLICKED(IDC_TOGGLE_STOCK_LIST_BTN, &CFloatingWnd::OnBnClickedToggleStockListBtn)
 	ON_BN_CLICKED(IDC_CALL_AUCTION_BTN, &CFloatingWnd::OnBnClickedCallAuctionBtn)
@@ -194,6 +196,10 @@ int CFloatingWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	CRect chipPeakBtnRect(closeBtnRect.left - rightBtnWidth, g_data.RDPI(2), closeBtnRect.left, g_data.RDPI(2) + btnHeight);
 	m_btnChipPeak.Create(_T("CM"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, chipPeakBtnRect, this, IDC_CHIP_PEAK_BTN);
+
+	// 明细按钮（MX）在 PK 与 CM 之间
+	CRect tickDetailBtnRect(closeBtnRect.left - rightBtnWidth * 2, g_data.RDPI(2), closeBtnRect.left - rightBtnWidth, g_data.RDPI(2) + btnHeight);
+	m_btnTickDetail.Create(_T("MX"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, tickDetailBtnRect, this, IDC_TICK_DETAIL_BTN);
 
 	CRect orderBookBtnRect(0, 0, rightBtnWidth, btnHeight);
 	m_btnOrderBook.Create(_T("PK"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, orderBookBtnRect, this, IDC_ORDER_BOOK_BTN);
@@ -572,7 +578,10 @@ void CFloatingWnd::OnPaint()
 			bool showObBtns = !isIndexKLine;
 			SafeSetWindowPos(m_btnChipPeak, w - obBtnW, obBtnTop, obBtnW, obBtnH);
 			SafeShowWindow(m_btnChipPeak, showObBtns);
-			SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+			// 明细按钮(MX)在 PK 与 CM 中间
+			SafeSetWindowPos(m_btnTickDetail, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+			SafeShowWindow(m_btnTickDetail, showObBtns);
+			SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 3, obBtnTop, obBtnW, obBtnH);
 			SafeShowWindow(m_btnOrderBook, showObBtns);
 		}
 
@@ -717,7 +726,10 @@ void CFloatingWnd::OnPaint()
 				bool showObBtns = !isIndexKLine;
 				SafeSetWindowPos(m_btnChipPeak, w - obBtnW, obBtnTop, obBtnW, obBtnH);
 				SafeShowWindow(m_btnChipPeak, showObBtns);
-				SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+				// 明细按钮(MX)在 PK 与 CM 中间
+				SafeSetWindowPos(m_btnTickDetail, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+				SafeShowWindow(m_btnTickDetail, showObBtns);
+				SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 3, obBtnTop, obBtnW, obBtnH);
 				SafeShowWindow(m_btnOrderBook, showObBtns);
 			}
 			// 竞价模式隐藏其他工具按钮
@@ -1063,12 +1075,21 @@ void CFloatingWnd::OnPaint()
 				bool showObBtns = !isIndexKLine;
 				SafeSetWindowPos(m_btnChipPeak, w - obBtnW, obBtnTop, obBtnW, obBtnH);
 				SafeShowWindow(m_btnChipPeak, showObBtns);
-				SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+				// 明细按钮(MX)在 PK 与 CM 中间
+				SafeSetWindowPos(m_btnTickDetail, w - obBtnW * 2, obBtnTop, obBtnW, obBtnH);
+				SafeShowWindow(m_btnTickDetail, showObBtns);
+				SafeSetWindowPos(m_btnOrderBook, w - obBtnW * 3, obBtnTop, obBtnW, obBtnH);
 				SafeShowWindow(m_btnOrderBook, showObBtns);
 			}
 
 			// 右侧盘口高度：不减xAxisLabelHeight（那是左侧走势图的时间标签，右侧不需要）
-			if (m_showChipPeak)
+			if (m_showTickDetail)
+			{
+				// 明细(MX)模式：在盘口区域绘制最近20条成交明细
+				m_orderBookPanel.DrawTickDetail(memDC, chartWidth, w,
+					h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData);
+			}
+			else if (m_showChipPeak)
 				m_chipPeakPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData, chipData, timelinePoint, m_viewMode);
 			else
 				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData, klineData, m_viewMode);
@@ -2165,6 +2186,7 @@ void CFloatingWnd::UpdateModeButtons()
 		if (m_btnIndicatorMACD.GetSafeHwnd()) m_btnIndicatorMACD.Invalidate();
 		SafeSetButtonStyle(m_btnChipPeak, m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
 		SafeSetButtonStyle(m_btnOrderBook, !m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
+		SafeSetButtonStyle(m_btnTickDetail, m_showTickDetail ? BS_DEFPUSHBUTTON : BS_FLAT);
 
 		SafeSetButtonStyle(m_btnExpand, m_expandedMode ? BS_FLAT : BS_DEFPUSHBUTTON);
 		m_btnExpand.SetWindowText(m_expandedMode ? _T("△") : _T("▽"));
@@ -2209,6 +2231,7 @@ void CFloatingWnd::UpdatePeriodComboVisibility()
 
 	SafeShowWindow(m_btnBoll, showIndicatorBtns);
 	SafeShowWindow(m_btnChipPeak, m_viewMode != UI_VIEW_OVERVIEW);
+	SafeShowWindow(m_btnTickDetail, m_viewMode != UI_VIEW_OVERVIEW);
 	SafeShowWindow(m_btnOrderBook, m_viewMode != UI_VIEW_OVERVIEW);
 }
 
@@ -2444,7 +2467,10 @@ void CFloatingWnd::OnBnClickedIndicatorMACDSignalBtn()
 
 void CFloatingWnd::OnBnClickedChipPeakBtn()
 {
+	// 切到筹码峰模式：退出明细模式
+	m_showTickDetail = false;
 	m_showChipPeak = !m_showChipPeak;
+	SafeSetButtonStyle(m_btnTickDetail, m_showTickDetail ? BS_DEFPUSHBUTTON : BS_FLAT);
 	SafeSetButtonStyle(m_btnChipPeak, m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
 	SafeSetButtonStyle(m_btnOrderBook, !m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
 
@@ -2454,11 +2480,24 @@ void CFloatingWnd::OnBnClickedChipPeakBtn()
 
 void CFloatingWnd::OnBnClickedOrderBookBtn()
 {
+	// 切到盘口模式：退出明细模式
+	m_showTickDetail = false;
 	m_showChipPeak = !m_showChipPeak;
+	SafeSetButtonStyle(m_btnTickDetail, m_showTickDetail ? BS_DEFPUSHBUTTON : BS_FLAT);
 	SafeSetButtonStyle(m_btnChipPeak, m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
 	SafeSetButtonStyle(m_btnOrderBook, !m_showChipPeak ? BS_DEFPUSHBUTTON : BS_FLAT);
 
 	EnsureChipPeakData();
+	Invalidate();
+}
+
+void CFloatingWnd::OnBnClickedTickDetailBtn()
+{
+	// 明细(MX)模式：切走时保留原PK/CM状态，进入时显示成交明细
+	m_showTickDetail = !m_showTickDetail;
+	SafeSetButtonStyle(m_btnTickDetail, m_showTickDetail ? BS_DEFPUSHBUTTON : BS_FLAT);
+	SafeSetButtonStyle(m_btnChipPeak, (!m_showTickDetail && m_showChipPeak) ? BS_DEFPUSHBUTTON : BS_FLAT);
+	SafeSetButtonStyle(m_btnOrderBook, (!m_showTickDetail && !m_showChipPeak) ? BS_DEFPUSHBUTTON : BS_FLAT);
 	Invalidate();
 }
 

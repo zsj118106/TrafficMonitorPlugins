@@ -68,6 +68,17 @@ namespace STOCK
 			: timeKey(tk), price(p), vol(v), buyOrSell(b) {}
 	};
 
+	// 每档价格的买卖方向成交量统计结果
+	struct PriceVolumeStat
+	{
+		Price price{ 0.0 };    // 成交价格档位
+		int buyOrSell{ 0 };    // 1=B买，0=S卖，2=中性
+		Volume vol{ 0 };       // 该档该方向的总成交量（手）
+
+		PriceVolumeStat() = default;
+		PriceVolumeStat(Price p, int b, Volume v) : price(p), buyOrSell(b), vol(v) {}
+	};
+
 	// 筹码分布数据点
 	struct ChipPoint
 	{
@@ -473,14 +484,6 @@ namespace STOCK
 		bool isAskSide{ true };       // true=卖方，false=买方
 	};
 
-	// 盘口累计成交量（仅卖一/买一减少量计入，代表被吃掉的成交）
-	struct OrderBookCumVol
-	{
-		Price price{ 0.0 };          // 盘口价格
-		Volume cumVolume{ 0 };       // 累计成交量（手）
-		bool isAskSide{ true };      // true=卖方，false=买方
-	};
-
 	// 内外盘2秒采样数据（增量净比+增量成交量）
 	struct VolumeSample {
 		double netRatio;      // 增量净比 (Δ外-Δ内)/(Δ外+Δ内)*100
@@ -568,8 +571,7 @@ namespace STOCK
 		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量（股）
 		std::map<Price, OrderPriceAccum> orderPriceAccumMap;
 
-		// 10档盘口累计成交量（仅卖一/买一减少量计入，key=价格）
-		std::map<Price, OrderBookCumVol> orderBookCumVolMap;
+		// 盘口累计成交量已改为从数据库 tick_trade 聚合读取，不再在 StockData 中维护
 
 		// 使用智能指针管理历史数据
 		std::map<Period, std::shared_ptr<HistoricalDataBase>> historicalData;
@@ -774,7 +776,6 @@ namespace STOCK
 		// 更新内外盘采样并持久化（与数据来源解耦，任何数据源更新后都应调用）
 		void UpdateVolumeSample();
 		void UpdateOrderPriceAccum();  // 更新五档挂单变化量（+N/-N）
-		void UpdateOrderBookCumVol(Price prevAsk1, Price prevBid1);  // 更新10档盘口累计成交量
 
 		// 从secVolumePool获取加权平均净比和净差（minutes: 1/5/10/20）
 		// 不足目标条数时有多少根就计算多少根

@@ -71,6 +71,7 @@ protected:
 	afx_msg void OnBnClickedIndicatorRSIBtn();
 	afx_msg void OnBnClickedChipPeakBtn();
 	afx_msg void OnBnClickedOrderBookBtn();
+	afx_msg void OnBnClickedTickDetailBtn();
 	afx_msg void OnBnClickedExpandBtn();
 	afx_msg void OnBnClickedToggleStockListBtn();
 	afx_msg void OnBnClickedCallAuctionBtn();
@@ -131,6 +132,7 @@ private:
 	CButton m_btnIndicatorRSI;   // RSI指标按钮
 	CButton m_btnChipPeak;       // 筹码峰按钮
 	CButton m_btnOrderBook;      // 盘口按钮（与筹码峰按钮切换）
+	CButton m_btnTickDetail;     // 成交明细按钮（MX）
 	CFont m_chipPeakFont;        // 筹码峰按钮小字体
 	std::wstring m_stock_id;
 	UIViewMode m_viewMode{ UI_VIEW_TIMELINE };  // 当前界面视图模式
@@ -191,6 +193,7 @@ private:
 	bool m_isHoveringKDJ{ false };
 	bool m_showTrendView{ false };
 	bool m_showChipPeak{ false };
+	bool m_showTickDetail{ false };  // 明细(MX)模式：盘口区域显示最近20条成交明细
 	bool m_expandedMode{ false };  // 放大模式：隐藏副图，走势图3/4+成交量1/4
 	bool m_showStockList{ true };  // 是否显示左侧股票列表面板
 	bool m_showJZCurve{ false };  // 基金净值曲线
