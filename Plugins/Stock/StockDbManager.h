@@ -54,7 +54,7 @@ public:
 	// 获取某股票最近 limit 条成交明细（按写入顺序倒序，最新在前）
 	// 仅包含主动买(0)/主动卖(1)，排除中性(2)、集合竞价(5)、尾盘定价(8)
 	std::vector<STOCK::Transaction> LoadLatestTransactions(const std::wstring& stockCode, int limit = 20);
-	// 按 code + trade_date 统计每档价格在买卖方向上的总成交量
+	// 按 code + trade_date 统计每档价格在买卖方向上的总成交量（先按 time_key/price/vol/buyorsell 去重，防采集端重复INSERT虚增）
 	// buyOrSell: 0=S卖 / 1=B买 时仅统计该方向；其它值(默认-1)只统计方向0和1，排除中性(2)
 	std::vector<STOCK::PriceVolumeStat> LoadPriceVolumeStats(const std::wstring& stockCode,
 		const std::string& tradeDate, int buyOrSell = -1);

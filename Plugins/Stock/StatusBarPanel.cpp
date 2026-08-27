@@ -299,14 +299,14 @@ void CStatusBarPanel::DrawRelatedStockBar(CDC& memDC, int w, int topBarY, int si
 
 			// 红绿颜色分3档，由浅到深
 			static const COLORREF AVG_RED_COLORS[] = {
-				RGB(240, 40, 40),   // 浅红
-				RGB(180, 50, 50),   // 中红
-				RGB(130, 20, 40)    // 深红
+				RGB(255, 13, 0),   // 浅红
+				RGB(255, 0, 25),   // 中红
+				RGB(102, 0, 102)    // 深红
 			};
 			static const COLORREF AVG_GREEN_COLORS[] = {
-				RGB(40, 240, 40),   // 浅绿
-				RGB(50, 180, 50),   // 中绿
-				RGB(20, 130, 40)    // 深绿
+				RGB(47, 158, 68),   // 浅绿
+				RGB(0, 230, 0),   // 中绿
+				RGB(10, 80, 55)    // 深绿
 			};
 
 			// 红绿颜色深度由均值在区间中的位置决定

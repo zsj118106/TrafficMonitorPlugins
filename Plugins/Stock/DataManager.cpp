@@ -624,7 +624,7 @@ int CDataManager::UpdateRealtimeFromQuotes(const std::vector<QuoteItem>& items)
 void CDataManager::ApplyRealtimeData(const std::vector<std::wstring>& codes, const std::string& resp)
 {
 	stockMarket.LoadRealtimeDataByJson(resp, codes);
-	
+
 	UpdateRelatedStocksAvgDiff();
 }
 
@@ -1176,7 +1176,7 @@ void CDataManager::UpdateRelatedStocksAvgDiff()
 		// 注意：用按股票的时间戳，避免函数级static被多只股票共享导致只有第一只被写库
 		time_t now = time(nullptr);
 		time_t& lastSaveTime = m_avg_diff_last_save_time[stockId];
-		if (now - lastSaveTime >= 60 && (CCommon::IsMarketSession() || m_setting_data.m_full_day == 1))
+		if (now - lastSaveTime >= 60 && CCommon::IsMarketSession())
 		{
 			lastSaveTime = now;
 			SaveAvgDiffStatsDb(stockId);

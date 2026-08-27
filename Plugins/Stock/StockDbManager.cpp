@@ -390,6 +390,16 @@ void CStockDbManager::CleanExpiredData()
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}
+
+	// 交易明细（tick_trade）只保留7天，删除更早的逐笔成交数据
+	const char* cleanTickTradeSql = "DELETE FROM tick_trade WHERE trade_date < ?;";
+	stmt = nullptr;
+	if (sqlite3_prepare_v2(m_db, cleanTickTradeSql, -1, &stmt, nullptr) == SQLITE_OK)
+	{
+		sqlite3_bind_text(stmt, 1, cutoffDate7d.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_step(stmt);
+		sqlite3_finalize(stmt);
+	}
 }
 
 bool CStockDbManager::SaveTradeRecord(const std::wstring& stockCode, const std::wstring& stockName, int tradeType, const std::wstring& time, double price, double amount, double totalAmount, double fee, double total)
@@ -1062,7 +1072,11 @@ std::vector<STOCK::PriceVolumeStat> CStockDbManager::LoadPriceVolumeStats(const 
 	std::vector<STOCK::PriceVolumeStat> result;
 	if (m_db == nullptr) return result;
 
-	std::string sql = "SELECT price, buyorsell, SUM(vol) FROM tick_trade "
+	// 先对 (time_key, price, vol, buyorsell) 去重再按档求和：
+	// 采集端偶发会把同一笔成交原样重复INSERT（实测某档重复率高达37~70倍），
+	// 若直接SUM会把这些重复量全部累加，导致“没成交累计量也显示很大”。正常日去重前后几乎不变。
+	std::string sql = "SELECT price, buyorsell, SUM(vol) FROM ( "
+		"SELECT DISTINCT time_key, price, vol, buyorsell FROM tick_trade "
 		"WHERE code = ? AND trade_date = ?";
 	if (buyOrSell == 0 || buyOrSell == 1)
 	{
@@ -1074,7 +1088,7 @@ std::vector<STOCK::PriceVolumeStat> CStockDbManager::LoadPriceVolumeStats(const 
 		// 默认只统计买卖两个方向(0,1)，排除中性(2)等其它值
 		sql += " AND buyorsell IN (0,1)";
 	}
-	sql += " GROUP BY price, buyorsell ORDER BY price ASC, buyorsell ASC;";
+	sql += " ) GROUP BY price, buyorsell ORDER BY price ASC, buyorsell ASC;";
 
 	sqlite3_stmt* stmt = nullptr;
 	if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) return result;

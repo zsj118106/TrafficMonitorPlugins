@@ -9,19 +9,19 @@
 #include <map>
 
 // 成交量颜色（按实际成交额档位分色）
-const COLORREF VOL_COL_NORMAL_BID = RGB(216, 68, 68);  // 买方正常单·浅红
-const COLORREF VOL_COL_BIG_BID    = RGB(194, 24, 24);    // 买方大单·深红
-const COLORREF VOL_COL_HUGE_BID   = RGB(144, 40, 184);   // 买方超大单·紫
+const COLORREF VOL_COL_NORMAL_BID = RGB(255, 13, 0);  // 买方正常单·浅红 216, 68, 68
+const COLORREF VOL_COL_BIG_BID = RGB(255, 0, 255);    // 买方大单·深红
+const COLORREF VOL_COL_HUGE_BID = RGB(102, 0, 102);   // 买方超大单·紫
 
 const COLORREF VOL_COL_NORMAL_ASK = RGB(47, 158, 68);  // 卖方正常单·浅绿
-const COLORREF VOL_COL_BIG_ASK    = RGB(14, 122, 40);    // 卖方大单·深绿
-const COLORREF VOL_COL_HUGE_ASK   = RGB(0, 89, 59);    // 卖方超大单·墨绿
+const COLORREF VOL_COL_BIG_ASK = RGB(0, 230, 0);    // 卖方大单·深绿
+const COLORREF VOL_COL_HUGE_ASK = RGB(10, 80, 55);    // 卖方超大单·墨绿
 
 // 静态成员初始化
 const COLORREF COrderBookPanel::NET_RATIO_RED_COLORS[] = {
 	RGB(240, 40, 40),   // 0-30
 	RGB(180, 50, 50),   // 30-60
-	RGB(130, 20, 40)    // 60以上
+	RGB(130, 20, 40)    // 60以上#CCE8CF
 };
 const COLORREF COrderBookPanel::NET_RATIO_GREEN_COLORS[] = {
 	RGB(40, 240, 40),  // 0~30 浅亮绿（弱多）
@@ -168,9 +168,6 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		DrawPriceRows(memDC, lc, askRows, 1, blinkOn);
 	}
 
-	// 选线分割（净比00，画在卖一与买一之间，不单独占行）
-	DrawNetRatio00Ex(memDC, lc, stockInfo, lc.RowY(6) - 2);
-
 	// 6-10: 买一~买五
 	{
 		std::vector<OrderBookRow> bidRows;
@@ -185,6 +182,10 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 		DrawPriceRows(memDC, lc, bidRows, 6, blinkOn);
 	}
 
+	// 选线分割（净比00，画在卖一与买一之间，不单独占行）
+	// 在买卖行绘制之后再画，避免被买一/卖一背景色盖住；2px线以两行边界为中线（上下各1px），居中于卖一与买一之间
+	DrawNetRatio00Ex(memDC, lc, stockInfo, lc.RowY(6) - 1);
+
 	// 11: 累计净流入（整日）
 	DrawNetInflowRow(memDC, lc, 11, L"累计净流入", m_cumNetInflow);
 
@@ -195,6 +196,7 @@ void COrderBookPanel::Draw(CDC& memDC, int left, int right, int height, const ST
 	DrawNetInflowRow(memDC, lc, 22, L"区间净流入", m_intervalNetInflow);
 
 	memDC.SelectObject(oldDrawFont);
+	m_compactMode = false;   // 恢复：其它绘制路径（备份/MX）按需再*3/4
 
 	// viewMode/klineData 仅用于旧完整版，精简版不再使用，避免未使用告警
 	(void)viewMode; (void)klineData;
@@ -500,8 +502,8 @@ void COrderBookPanel::DrawNetRatio00(CDC& memDC, const LayoutContext& lc, const 
 	if (barW <= 0)
 		return;
 
-	// 画在卖一(行7)和买一(行8)之间的间隙
-	int barY = lc.RowY(8) - 2;
+	// 画在卖一(行7)和买一(行8)之间的间隙，不占独立行；2px线以边界为中线居中（上下各1px）
+	int barY = lc.RowY(8) - 1;
 	int midX = barX + barW / 2;
 	int halfW = barW / 2;
 	int fillW = static_cast<int>(std::sqrt(std::abs(ratio) / 100.0) * halfW);
@@ -542,7 +544,7 @@ void COrderBookPanel::DrawHighLow(CDC& memDC, const LayoutContext& lc, const STO
 	CFont* oldFont = memDC.GetCurrentFont();
 	LOGFONT lf;
 	oldFont->GetLogFont(&lf);
-	lf.lfHeight = lf.lfHeight * 7 / 8;
+	//lf.lfHeight = lf.lfHeight * 7 / 8;
 	CFont smallFont;
 	smallFont.CreateFontIndirect(&lf);
 	memDC.SelectObject(&smallFont);
@@ -730,8 +732,11 @@ void COrderBookPanel::DrawTickMini(CDC& memDC, const LayoutContext& lc, int star
 
 		double turnover = t.price * static_cast<double>(t.vol) * 100.0;
 		COLORREF volColor;
-		if (turnover >= 500000.0)          // 超大单 ≥50万
+		if (turnover >= 500000.0) {          // 超大单 ≥50万
 			volColor = isSell ? VOL_COL_HUGE_ASK : VOL_COL_HUGE_BID;
+			memDC.SetTextColor(RGB(160, 160, 160));
+			memDC.TextOut(volX + 1, textY + 1, volStr);
+		}
 		else if (turnover >= 200000.0)     // 大单 20万~50万
 			volColor = isSell ? VOL_COL_BIG_ASK : VOL_COL_BIG_BID;
 		else                               // 正常单 <20万
@@ -885,8 +890,9 @@ void COrderBookPanel::DrawTickDetail(CDC& memDC, int left, int right, int height
 		// 实际成交额（元）= 成交价 * 成交量(手) * 100；按档位为成交量单独配色
 		double turnover = t.price * static_cast<double>(t.vol) * 100.0;
 		COLORREF volColor;
-		if (turnover >= 500000.0)          // 超大单 ≥50万
+		if (turnover >= 500000.0) {          // 超大单 ≥50万
 			volColor = isSell ? VOL_COL_HUGE_ASK : VOL_COL_HUGE_BID;
+		}
 		else if (turnover >= 200000.0)     // 大单 20万~50万
 			volColor = isSell ? VOL_COL_BIG_ASK : VOL_COL_BIG_BID;
 		else                               // 正常单 <20万
@@ -917,6 +923,11 @@ void COrderBookPanel::DrawTickDetail(CDC& memDC, int left, int right, int height
 		int sbX = right - dirW - g_data.RDPI(2);
 		int volX = sbX - volW - g_data.RDPI(12);
 		volX = max(volX, textX + memDC.GetTextExtent(leftTxt).cx + g_data.RDPI(8));
+
+		if (turnover >= 500000.0) {          // 超大单 ≥50万
+			memDC.SetTextColor(RGB(160, 160, 160));
+			memDC.TextOut(volX + 1, textY + 1, volStr);
+		}
 		// 成交量单独按成交额档位配色
 		memDC.SetTextColor(volColor);
 		memDC.TextOut(volX, textY, volStr);
@@ -1438,7 +1449,7 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildAskRow(const STOCK::StockInf
 	volumeStr.Format(_T("%lld"), static_cast<long long>(volume));
 	CString priceStr = stockInfo.IsETF() ? CCommon::FormatETFPrice(price) : CCommon::FormatFloat(price);
 	CString askTxt;
-	askTxt.Format(_T("S%d:%s"), idx + 1, priceStr);
+	askTxt.Format(_T("%s"), priceStr); //askTxt.Format(_T("S%d:%s"), idx + 1, priceStr);
 	CString askSuffix;
 	askSuffix.Format(_T(" %s"), volumeStr.GetString());
 	CString deltaStr;
@@ -1460,7 +1471,7 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildAskRow(const STOCK::StockInf
 	row.text = askTxt;
 	row.smallSuffix = askSuffix;
 	row.rightAlignSuffix = deltaStr;
-	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
+	row.rightAlignSuffixColor = COLOR_RED_UP;
 	row.cumVolSuffix = cumVolStr;
 	row.cumVolSuffixColor = RGB(128, 0, 128);
 	row.drawSmallSuffix = true;
@@ -1491,7 +1502,7 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildBidRow(const STOCK::StockInf
 	volumeStr.Format(_T("%lld"), static_cast<long long>(volume));
 	CString priceStr = stockInfo.IsETF() ? CCommon::FormatETFPrice(price) : CCommon::FormatFloat(price);
 	CString bidTxt;
-	bidTxt.Format(_T("B%d:%s"), idx + 1, priceStr);
+	bidTxt.Format(_T("%s"), priceStr); //bidTxt.Format(_T("B%d:%s"), idx + 1, priceStr);
 	CString bidSuffix;
 	bidSuffix.Format(_T(" %s"), volumeStr.GetString());
 	CString deltaStr;
@@ -1513,7 +1524,7 @@ COrderBookPanel::OrderBookRow COrderBookPanel::BuildBidRow(const STOCK::StockInf
 	row.text = bidTxt;
 	row.smallSuffix = bidSuffix;
 	row.rightAlignSuffix = deltaStr;
-	row.rightAlignSuffixColor = delta > 0 ? COLOR_RED_UP : COLOR_GREEN_DOWN;
+	row.rightAlignSuffixColor = COLOR_GREEN_DOWN;
 	row.cumVolSuffix = cumVolStr;
 	row.cumVolSuffixColor = RGB(0, 100, 0);
 	row.drawSmallSuffix = true;
