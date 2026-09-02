@@ -5,7 +5,6 @@
 #include "DataManager.h"
 #include "SignalAnalyzer.h"
 #include "StockIndicator.h"
-#include "KLineChart.h"
 #include "IndicatorChart.h"
 #include "StatusBarPanel.h"
 #include <algorithm>
@@ -89,20 +88,19 @@ void CTimelineChart::DrawTimelineHeader(CDC& memDC, const TimelineDrawContext& c
 	if (stockData && stockData->info.is_ok)
 		macdSignal = stockData->macdTrendSignal;
 
-	CStatusBarPanel statusBarPanel;
-	statusBarPanel.DrawHeader(memDC, ctx.realtimeData, ctx.windowWidth, g_data.RDPI(26), macdSignal);
+	CStatusBarPanel::DrawMainHeader(memDC, ctx.realtimeData, ctx.windowWidth, g_data.RDPI(26));
 	memDC.SetViewportOrg(origOrg);
 }
 
-void CTimelineChart::DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx, UIViewMode viewMode)
+void CTimelineChart::DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx)
 {
-	DrawTimelineBackgroundHighlightsForArea(memDC, ctx, ctx.priceChartTop, ctx.priceChartHeight, viewMode);
+	DrawTimelineBackgroundHighlightsForArea(memDC, ctx, ctx.priceChartTop, ctx.priceChartHeight);
 }
 
-void CTimelineChart::DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight, UIViewMode viewMode)
+void CTimelineChart::DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight)
 {
 	// 仅分时模式（1分钟数据）绘制5分钟交替高亮，5分钟/30分钟/日K线模式不绘制
-	if (viewMode != UI_VIEW_TIMELINE)
+	if (g_data.GetCurrentViewMode() != UI_VIEW_TIMELINE)
 		return;
 
 	if (!ctx.timelinePoint || ctx.timelinePoint->empty())
@@ -307,7 +305,7 @@ void CTimelineChart::DrawTimelineCostAndProfitLines(CDC& memDC, const TimelineDr
 
 void CTimelineChart::DrawTimelineGridAndLines(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover)
 {
-	DrawTimelineBackgroundHighlights(memDC, ctx, hover.viewMode);
+	DrawTimelineBackgroundHighlights(memDC, ctx);
 	DrawTimelineGridLines(memDC, ctx);
 	DrawTimelinePriceLabels(memDC, ctx);
 	DrawTimelineCostAndProfitLines(memDC, ctx, hover);
@@ -1771,16 +1769,16 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 
 			int rightX = ctx.chartWidth - g_data.RDPI(4) - iopvLs.cx - iopvVs.cx - premLs.cx - premVs.cx;
 			memDC.SetTextColor(COLOR_BLACK);
-			memDC.TextOut(rightX, centerY - iopvLs.cy / 2, iopvLabel);
-			rightX += iopvLs.cx;
-			memDC.SetTextColor(iopvColor);
-			memDC.TextOut(rightX, centerY - iopvVs.cy / 2, iopvVal);
-			rightX += iopvVs.cx;
-			memDC.SetTextColor(COLOR_BLACK);
 			memDC.TextOut(rightX, centerY - premLs.cy / 2, premLabel);
 			rightX += premLs.cx;
 			memDC.SetTextColor(premColor);
 			memDC.TextOut(rightX, centerY - premVs.cy / 2, premVal);
+			rightX += premVs.cx;
+			memDC.SetTextColor(COLOR_BLACK);
+			memDC.TextOut(rightX, centerY - iopvLs.cy / 2, iopvLabel);
+			rightX += iopvLs.cx;
+			memDC.SetTextColor(iopvColor);
+			memDC.TextOut(rightX, centerY - iopvVs.cy / 2, iopvVal);
 		}
 		else
 		{
@@ -1858,17 +1856,18 @@ void CTimelineChart::DrawPriceChartArea(CDC& memDC, const TimelineDrawContext& c
 			CSize premVs = memDC.GetTextExtent(premVal);
 
 			int rightX = ctx.chartWidth - g_data.RDPI(4) - iopvLs.cx - iopvVs.cx - premLs.cx - premVs.cx;
-			memDC.SetTextColor(COLOR_BLACK);
-			memDC.TextOut(rightX, centerY - iopvLs.cy / 2, iopvLabel);
-			rightX += iopvLs.cx;
-			memDC.SetTextColor(iopvColor);
-			memDC.TextOut(rightX, centerY - iopvVs.cy / 2, iopvVal);
-			rightX += iopvVs.cx;
+
 			memDC.SetTextColor(COLOR_BLACK);
 			memDC.TextOut(rightX, centerY - premLs.cy / 2, premLabel);
 			rightX += premLs.cx;
 			memDC.SetTextColor(premColor);
 			memDC.TextOut(rightX, centerY - premVs.cy / 2, premVal);
+			rightX += premVs.cx;
+			memDC.SetTextColor(COLOR_BLACK);
+			memDC.TextOut(rightX, centerY - iopvLs.cy / 2, iopvLabel);
+			rightX += iopvLs.cx;
+			memDC.SetTextColor(iopvColor);
+			memDC.TextOut(rightX, centerY - iopvVs.cy / 2, iopvVal);
 		}
 		else
 		{

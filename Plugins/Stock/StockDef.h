@@ -65,7 +65,33 @@ namespace STOCK
 
 		Transaction() = default;
 		Transaction(std::string tk, Price p, Volume v, int b)
-			: timeKey(tk), price(p), vol(v), buyOrSell(b) {}
+			: timeKey(tk), price(p), vol(v), buyOrSell(b) {
+		}
+	};
+
+	// 每分钟交易明细汇总统计
+	struct TickSummary
+	{
+		std::string timeKey;   // 接口返回时间 HH:MM（无秒）
+		Volume buy{ 0 };       // 主动买入成交量（手）
+		Volume sell{ 0 };      // 主动卖出成交量（手）
+		Volume netBuy;		   // 净买入成交量（手）
+
+		TickSummary() = default;
+		TickSummary(std::string tk, Volume b, Volume s, Volume nb)
+			: timeKey(tk), buy(b), sell(s), netBuy(nb) {
+		}
+
+		double BuyRatio() const
+		{
+			if (buy + sell == 0) return 0.0;
+			return static_cast<double>(buy) / (buy + sell);
+		}
+		double SellRatio() const
+		{
+			if (buy + sell == 0) return 0.0;
+			return static_cast<double>(sell) / (buy + sell);
+		}
 	};
 
 	// 每档价格的买卖方向成交量统计结果

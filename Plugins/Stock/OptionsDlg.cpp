@@ -388,6 +388,6 @@ void COptionsDlg::OnBnClickedRelatedStock()
 	CRelateStockDlg dlg(std::wstring(currentCode), this);
 	if (dlg.DoModal() == IDOK)
 	{
-		m_related_stocks = dlg.m_selected_codes;
+		m_related_stocks = dlg.m_selected;
 	}
 }

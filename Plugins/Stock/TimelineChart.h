@@ -29,8 +29,6 @@ public:
 		bool showTrendView{ false };
 		bool showChipPeak{ false };
 		bool expandedMode{ false };
-		int klinePeriodDays{ 250 };
-		int scrollOffset{ 0 };
 		int timelineScrollOffset{ -1 };
 		int timelineVisibleCount{ 40 };
 		int timelineLastTotalPoints{ 0 };
@@ -47,9 +45,9 @@ public:
 
 	// 分时图绘制
 	void DrawTimelineHeader(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);
-	void DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx, UIViewMode viewMode);
+	void DrawTimelineBackgroundHighlights(CDC& memDC, const TimelineDrawContext& ctx);
 	// 在指定区域绘制分时背景高亮（5分钟交替），供价格区/成交量/MACD/KDJ等区域复用
-	static void DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight, UIViewMode viewMode);
+	static void DrawTimelineBackgroundHighlightsForArea(CDC& memDC, const TimelineDrawContext& ctx, int chartTop, int chartHeight);
 	void DrawTimelineGridLines(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelinePriceLabels(CDC& memDC, const TimelineDrawContext& ctx);
 	void DrawTimelineCostAndProfitLines(CDC& memDC, const TimelineDrawContext& ctx, const HoverState& hover);

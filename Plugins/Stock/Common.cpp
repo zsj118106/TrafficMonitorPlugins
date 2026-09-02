@@ -43,15 +43,10 @@ bool CCommon::GetURL(const std::wstring& url, std::string& result, bool utf8, LP
 	return CNetFetch::GetURL(url, result, user_agent, headers);
 }
 
-void CCommon::WriteLog(const WORD w, LPCTSTR file_path)
-{
-	char buff[32];
-	sprintf_s(buff, "%d", w);
-	CCommon::WriteLog(buff, file_path);
-}
-
 void CCommon::WriteLog(const char* str_text, LPCTSTR file_path)
 {
+	if (file_path == nullptr) file_path = g_data.m_log_path.c_str();
+
 	static std::string last_text;
 	//过滤相同内容的日志
 	if (last_text != str_text)
@@ -71,6 +66,7 @@ void CCommon::WriteLog(const char* str_text, LPCTSTR file_path)
 
 void CCommon::WriteLog(const wchar_t* str_text, LPCTSTR file_path)
 {
+	if (file_path == nullptr) file_path = g_data.m_log_path.c_str();
 	WriteLog(UnicodeToStr(str_text, true).c_str(), file_path);
 }
 
@@ -359,11 +355,11 @@ bool CCommon::IsMarketSession()
 	// 周六日休市
 	if (now.wDayOfWeek == 0 || now.wDayOfWeek == 6)
 		return false;
-	// A股交易时间：9:30-11:30, 13:00-15:00
+	// A股交易时间：9:15-11:30, 12：55-15:00
 	int minutes = now.wHour * 60 + now.wMinute;
-	if (minutes < 9 * 60 + 30)          // 9:30之前
+	if (minutes < 9 * 60 + 15)          // 9:30之前
 		return false;
-	if (minutes > 11 * 60 + 30 && minutes < 13 * 60)  // 11:30-13:00午休
+	if (minutes > 11 * 60 + 30 && minutes < 12 * 60 + 55)  // 11:30-12:55午休
 		return false;
 	if (minutes > 15 * 60)              // 15:00之后
 		return false;
@@ -405,4 +401,15 @@ int CCommon::GetTradingMinute(time_t t)
 	std::tm tm = {};
 	localtime_s(&tm, &t);
 	return GetTradingMinute(tm.tm_hour, tm.tm_min);
+}
+
+// 获取当天日期字符串 YYYY-MM-DD
+std::string CCommon::GetTodayDate()
+{
+	time_t now = time(nullptr);
+	tm localTm = {};
+	localtime_s(&localTm, &now);
+	char buf[16];
+	sprintf_s(buf, "%04d-%02d-%02d", localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday);
+	return buf;
 }

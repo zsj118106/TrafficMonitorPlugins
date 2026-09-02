@@ -21,11 +21,6 @@ public:
 		const std::vector<STOCK::KLinePoint>& klineData,
 		UIViewMode viewMode);
 
-	// 原始版盘口绘制（18行，含委比/趋势/净比/振幅/换手率），留作与新精简版对比，不参与实际调用
-	void DrawBackup(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo,
-		const std::vector<STOCK::KLinePoint>& klineData,
-		UIViewMode viewMode);
-
 	// 绘制成交明细界面（MX模式）：显示最近20条成交，每隔2秒从数据库刷新
 	// left,right: 面板左右边界；height: 面板总高度（含盘口标题栏）
 	void DrawTickDetail(CDC& memDC, int left, int right, int height, const STOCK::StockInfo& stockInfo);
@@ -35,6 +30,7 @@ private:
 	struct OrderBookRow
 	{
 		STOCK::Price price;
+		STOCK::Price IOPV;  // 净值
 		CString text;
 		CString smallSuffix;
 		CString rightAlignSuffix;  // 右对齐的瞬时变化量（+N/-N）
@@ -46,7 +42,6 @@ private:
 		COLORREF backgroundColor;
 		bool drawSmallSuffix{ false };
 		bool darkBackground{ false };  // 深色背景时文字改白色
-		bool blink{ false };  // 闪烁效果：当前价=卖一/买一且挂单≤1万
 		bool bold{ false };   // 粗体
 	};
 
@@ -85,16 +80,13 @@ private:
 	void DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, UIViewMode viewMode);
 
 	// 绘制卖盘行（最高+卖三~卖一，行2-5）
-	void DrawAskRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, bool blinkOn);
+	void DrawAskRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
 	// 绘制净比00柱状图（行6）
 	void DrawNetRatio00(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
 	// 绘制买盘行（买一~买三+最低，行7-10）
-	void DrawBidRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, bool blinkOn);
-
-	// 绘制净比01/05/10/20（行11-14）
-	void DrawNetRatioPeriods(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
+	void DrawBidRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
 	// 绘制净比99（行15）
 	void DrawNetRatio99(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
@@ -119,7 +111,10 @@ private:
 	void RefreshTickMini(const STOCK::StockInfo& stockInfo, int limit);
 
 	// 辅助：绘制单行盘口文本（含小号后缀、右对齐后缀）
-	void DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, int x, int y, int rowWidth, bool blinkOff = false);
+	// x, y: 文本绘制坐标；rowWidth: 文本区宽度
+	// rowLeft, rowTop, rowHeight: 当前行的左边界、顶部、高度（基金净值紫色横线据此定位）
+	void DrawOrderBookRowText(CDC& memDC, const OrderBookRow& row, int x, int y, int rowWidth,
+		int rowLeft, int rowTop, int rowHeight);
 
 	// 辅助：绘制净比条形图
 	void DrawRatioBar(CDC& memDC, int x, int y, int w, int h, double ratio);
@@ -152,7 +147,7 @@ private:
 	OrderBookRow BuildBidRow(const STOCK::StockInfo& stockInfo, int idx, STOCK::Volume delta) const;
 
 	// 辅助：绘制一组盘口行
-	void DrawPriceRows(CDC& memDC, const LayoutContext& lc, const std::vector<OrderBookRow>& rows, int startRow, bool blinkOn);
+	void DrawPriceRows(CDC& memDC, const LayoutContext& lc, const std::vector<OrderBookRow>& rows, int startRow);
 
 private:
 	// 缓存数据（原Draw中的static变量）
@@ -161,8 +156,7 @@ private:
 	// 净比99趋势缓存
 	static std::map<std::wstring, double> m_lastNetRatioMap;
 	static std::map<std::wstring, CString> m_lastNetRatioTrendMap;
-	// 净比1/5/10/20趋势缓存
-	static std::map<std::wstring, std::map<int, double>> m_lastPeriodRatioMap;
+
 	static std::map<std::wstring, std::map<int, CString>> m_lastPeriodRatioTrendMap;
 
 	// 各价格档位的真实累计成交量（来自数据库 tick_trade 聚合）
@@ -188,7 +182,4 @@ private:
 	std::vector<STOCK::Transaction> m_tickMiniDetails;
 	std::wstring m_tickMiniCode;
 	DWORD m_lastTickMiniRefreshTick{ 0 };
-
-	// 精简版盘口：整个面板已按行高缩小字体，避免后缀再次*3/4造成双重缩小
-	bool m_compactMode{ false };
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "StockDef.h"
+#include "Common.h"
 
 class CSignalAnalyzer
 {
@@ -18,7 +19,8 @@ public:
 
 		SignalParam()
 			: bollPeriod(20), kdjPeriod(9), rsiPeriod(6), rsiPeriod30m(14)
-			, atrPeriod(14), wrPeriod(6), rsiUseEma(true) {}
+			, atrPeriod(14), wrPeriod(6), rsiUseEma(true) {
+		}
 	};
 
 	// 获取/设置全局参数
@@ -145,6 +147,20 @@ public:
 	static bool Calc5MinDown(const std::vector<STOCK::Bar>& bars5);
 	// 内外盘净比计算
 	static double CalcOuterInnerRatio(STOCK::Volume outerVol, STOCK::Volume innerVol);
+
+	// ========== 盘口趋势行分段文本 ==========
+	// 分段文本：一段文字 + 一个颜色，由计算方赋值，绘制方仅逐段渲染
+	struct TextSeg
+	{
+		CString text;      // 文本内容
+		COLORREF color;    // 该段文字颜色
+	};
+	// 计算盘口“趋势”行分段文本（形如 "日:上涨(回调) 30:震荡(高抛) 5:下跌(反弹) 分时:上涨"）
+	// 输入：仅最新行情（含股票代码），内部依次拉取并计算日K/30分钟/5分钟/分时各周期趋势
+	// 每个区间均附带 回调/反弹/低吸/高抛 后缀（由下一级小周期共振判定）
+	// 说明：判定逻辑原位于 COrderBookPanel::DrawTrend，抽离至此保持数据计算与图形绘制分离
+	static std::vector<TextSeg> CalcTrendSegments(const STOCK::StockInfo& stockInfo);
+
 	// 完整趋势判定主函数
 	static STOCK::TrendResult CalcTrend(const std::vector<STOCK::Bar>& bars5, const std::vector<STOCK::Bar>& bars30,
 		STOCK::Volume outerVol = 0, STOCK::Volume innerVol = 0);
@@ -229,7 +245,8 @@ public:
 			, batchForbidBuy(false), batchForbidSell(false)
 			, batchKdjTopPassiveExempt(false), batchStrongTrendUp(false)
 			, batchSellFilteredByForbid(false), batchBuyFilteredByForbid(false)
-			, batchSellFilteredByGap(false) {}
+			, batchSellFilteredByGap(false) {
+		}
 	};
 	// 统一信号分析：bars5/bars30为完整K线数据，barIndex为点击位置
 	// 批量信号用完整数据（逐根递推无未来函数），指标值用截取子序列（无未来函数）
@@ -293,7 +310,8 @@ public:
 			, isLongTrend(false), isShortTrend(false)
 			, topDivergence(false), botDivergence(false)
 			, barGrowingRed(false), barShrinkRed(false)
-			, barGrowingGreen(false), barShrinkGreen(false) {}
+			, barGrowingGreen(false), barShrinkGreen(false) {
+		}
 	};
 
 	// T+0操作信号类型

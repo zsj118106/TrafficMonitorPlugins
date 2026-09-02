@@ -287,9 +287,9 @@ void CIndicatorChart::DrawVolumeChartArea(CDC& memDC, const TimelineDrawContext&
 	tmpCtx.volumeChartHeight = areaHeight - titleH;
 
 	// 先绘制背景高亮，确保数据不被覆盖
-	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight, hover.viewMode);
+	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight);
 
-	DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
+	DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints);
 
 	if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
 	{
@@ -571,7 +571,7 @@ void CIndicatorChart::DrawMacdChartArea(CDC& memDC, const TimelineDrawContext& c
 	memDC.SetBkMode(oldBkMode);
 
 	// 先绘制背景高亮，确保数据不被覆盖
-	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
+	CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight);
 
 	DrawMACDChart(memDC, 0, tmpCtx.macdChartTop, ctx.chartWidth, tmpCtx.macdChartHeight, timelinePoint, macdData, ctx.startIndex, -1, ctx.xAxisPoints);
 
@@ -883,21 +883,21 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
-		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight);
 		DrawTimelineKDJSection(memDC, tmpCtx, hover);
 	}
 	else if (indicator == TimelineIndicator::WR)
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
-		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight);
 		DrawTimelineWRSection(memDC, tmpCtx, hover);
 	}
 	else if (indicator == TimelineIndicator::RSI)
 	{
 		tmpCtx.macdChartTop = areaTop + titleH;
 		tmpCtx.macdChartHeight = areaHeight - titleH;
-		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight, hover.viewMode);
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.macdChartTop, tmpCtx.macdChartHeight);
 		DrawTimelineRSISection(memDC, tmpCtx, hover);
 	}
 	else
@@ -905,8 +905,8 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 		// 成交量模式（MACD枚举值现在表示成交量）
 		tmpCtx.volumeChartTop = areaTop + titleH;
 		tmpCtx.volumeChartHeight = areaHeight - titleH;
-		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight, hover.viewMode);
-		DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints, hover.isHoveringVolume, hover.hoveredBarIndex);
+		CTimelineChart::DrawTimelineBackgroundHighlightsForArea(memDC, tmpCtx, tmpCtx.volumeChartTop, tmpCtx.volumeChartHeight);
+		DrawVolumeChart(memDC, 0, tmpCtx.volumeChartTop, ctx.chartWidth, tmpCtx.volumeChartHeight, *ctx.timelinePoint, &ctx.realtimeData, 0, -1, ctx.xAxisPoints);
 
 		if (hover.viewMode == UI_VIEW_MIN5_KLINE && ctx.fullTimeline && !ctx.fullTimeline->empty() && ctx.timelinePoint && !ctx.timelinePoint->empty())
 		{
@@ -1038,153 +1038,6 @@ void CIndicatorChart::DrawIndicatorChartArea(CDC& memDC, const TimelineDrawConte
 			memDC.TextOut(labelX, chartBottom + g_data.RDPI(2), timeLabel);
 		}
 	}
-}
-
-// ========== DrawMACDChart（K线数据版本） ==========
-
-void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int height,
-	const std::vector<STOCK::KLinePoint>& klineData,
-	const std::vector<MACDData>& macdData, int klinePeriodDays,
-	int scrollOffset, int startIndex /* = 0 */, int visibleCount /* = -1 */)
-{
-	if (klineData.empty() || macdData.empty())
-		return;
-
-	int total = static_cast<int>(macdData.size());
-	int endIdx = total;
-	if (visibleCount > 0)
-	{
-		endIdx = (std::min)(total, startIndex + visibleCount);
-		startIndex = (std::max)(0, (std::min)(startIndex, total - 1));
-		if (endIdx <= startIndex) endIdx = startIndex + 1;
-	}
-	else
-	{
-		startIndex = 0;
-	}
-
-	double maxAbs = 0;
-	for (const auto& m : macdData)
-	{
-		if (m.valid)
-		{
-			maxAbs = (std::max)(maxAbs, std::abs(m.dif));
-			maxAbs = (std::max)(maxAbs, std::abs(m.dea));
-			maxAbs = (std::max)(maxAbs, std::abs(m.bar));
-		}
-	}
-	if (maxAbs == 0)
-		return;
-
-	int zeroY = y + height / 2;
-	float unitY = (height / 2.0f - g_data.RDPI(2)) / static_cast<float>(maxAbs);
-
-	CPen zeroPen(PS_DASHDOT, 1, COLOR_GRAY_MIDDLE);
-	CPen* pOldPen = memDC.SelectObject(&zeroPen);
-	memDC.MoveTo(x, zeroY);
-	memDC.LineTo(x + width, zeroY);
-
-	int displayCount = min(klinePeriodDays, static_cast<int>(klineData.size()));
-	int maxVisibleKlines = min(displayCount, width / 3);
-	int finalStartIndex = max(0, static_cast<int>(klineData.size()) - maxVisibleKlines - scrollOffset);
-	finalStartIndex = max(0, min(finalStartIndex, static_cast<int>(klineData.size()) - maxVisibleKlines));
-
-	int totalVisible = static_cast<int>(klineData.size()) - finalStartIndex;
-	if (totalVisible <= 0) { memDC.SelectObject(pOldPen); return; }
-
-	int slotWidth = width / totalVisible;
-	int barWidth = max(2, static_cast<int>((slotWidth - 1) * 0.8));
-	int halfSlot = slotWidth / 2;
-
-	int drawStart = max(startIndex, finalStartIndex);
-	int drawEnd = min(endIdx, static_cast<int>(macdData.size()));
-
-	for (int i = drawStart; i < drawEnd; i++)
-	{
-		if (!macdData[i].valid)
-			continue;
-		int barX = x + (i - finalStartIndex) * slotWidth + halfSlot - barWidth / 2;
-		double barVal = macdData[i].bar;
-		int barHeight = static_cast<int>(std::abs(barVal) * unitY);
-		barHeight = max(1, barHeight);
-		COLORREF color = (barVal >= 0) ? COLOR_RED_UP : COLOR_GREEN_DOWN;
-		CBrush brush(color);
-		int barY = (barVal >= 0) ? zeroY - barHeight : zeroY;
-		memDC.FillRect(CRect(barX, barY, barX + barWidth, zeroY + (barVal >= 0 ? 0 : barHeight)), &brush);
-	}
-
-	// 绘制 DIF/DEA 双线（分段动态画笔：多头DIF粗橙实线+DEA浅灰细虚线，空头DEA粗蓝实线+DIF浅灰细虚线）
-	{
-		struct MacdPoint { int x; int yDif; int yDea; double dif; double dea; };
-		std::vector<MacdPoint> pts;
-		for (int i = drawStart; i < drawEnd; i++)
-		{
-			if (!macdData[i].valid) continue;
-			int px = x + (i - finalStartIndex) * slotWidth + slotWidth / 2;
-			int pyDif = zeroY - static_cast<int>(macdData[i].dif * unitY);
-			int pyDea = zeroY - static_cast<int>(macdData[i].dea * unitY);
-			pts.push_back({ px, pyDif, pyDea, macdData[i].dif, macdData[i].dea });
-		}
-		if (pts.size() >= 2)
-		{
-			enum EMacdState { STATE_LONG, STATE_SHORT };
-			struct Seg { int from; int to; EMacdState state; };
-			std::vector<Seg> segList;
-			int segStart = 0;
-			EMacdState curState = (pts[0].dif >= pts[0].dea) ? STATE_LONG : STATE_SHORT;
-			for (size_t i = 1; i < pts.size(); i++)
-			{
-				EMacdState st = (pts[i].dif >= pts[i].dea) ? STATE_LONG : STATE_SHORT;
-				if (st != curState)
-				{
-					segList.push_back({ segStart, static_cast<int>(i), curState });
-					segStart = static_cast<int>(i);
-					curState = st;
-				}
-			}
-			segList.push_back({ segStart, static_cast<int>(pts.size()) - 1, curState });
-
-			for (const auto& seg : segList)
-			{
-				std::vector<CPoint> ptsDif, ptsDea;
-				ptsDif.reserve(seg.to - seg.from + 1);
-				ptsDea.reserve(seg.to - seg.from + 1);
-				for (int i = seg.from; i <= seg.to; i++)
-				{
-					ptsDif.push_back(CPoint(pts[i].x, pts[i].yDif));
-					ptsDea.push_back(CPoint(pts[i].x, pts[i].yDea));
-				}
-
-				if (seg.state == STATE_LONG)
-				{
-					CPen penMain(PS_SOLID, 2, COLOR_DARK_ORANGE);
-					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
-					memDC.SelectObject(&penMain);
-					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
-					memDC.SelectObject(&penSub);
-					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
-				}
-				else
-				{
-					CPen penMain(PS_SOLID, 2, COLOR_BLUE_AVG1);
-					CPen penSub(PS_SOLID, 1, COLOR_BLACK);
-					memDC.SelectObject(&penMain);
-					memDC.Polyline(&ptsDea[0], static_cast<int>(ptsDea.size()));
-					memDC.SelectObject(&penSub);
-					memDC.Polyline(&ptsDif[0], static_cast<int>(ptsDif.size()));
-				}
-			}
-		}
-		else if (pts.size() == 1)
-		{
-			CPen penMain(PS_SOLID, 2, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_BLUE_AVG1);
-			memDC.SelectObject(&penMain);
-			memDC.SetPixel(pts[0].x, pts[0].yDif, (pts[0].dif >= pts[0].dea) ? COLOR_DARK_ORANGE : COLOR_MACD_SUB);
-			memDC.SetPixel(pts[0].x, pts[0].yDea, (pts[0].dif >= pts[0].dea) ? COLOR_MACD_SUB : COLOR_BLUE_AVG1);
-		}
-	}
-
-	memDC.SelectObject(pOldPen);
 }
 
 // ========== DrawCrossArrow ==========
@@ -1607,9 +1460,13 @@ void CIndicatorChart::DrawTimelineRSISection(CDC& memDC, const TimelineDrawConte
 	DrawSectionGridAndTimeLabels(memDC, ctx, ctx.macdChartTop, ctx.macdChartHeight, true);
 }
 
-// ========== DrawVolumeChart ==========
+// 绘制成交量图表
+// 70% 以内的数据用开方缩放，70% 以上的数据用线性缩放，避免单根巨量柱子导致其他柱子过小而看不清
 
-void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::TimelinePoint>& timelinePoint, const STOCK::StockInfo* stockInfo /* = nullptr */, int startIndex /* = 0 */, int visibleCount /* = -1 */, int xAxisPoints /* = 0 */, bool isHoveringVolume /* = false */, int hoveredBarIndex /* = -1 */)
+void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int height,
+	const std::vector<STOCK::TimelinePoint>& timelinePoint,
+	const STOCK::StockInfo* stockInfo,
+	int startIndex /* = 0 */, int visibleCount /* = -1 */, int xAxisPoints /* = 0 */)
 {
 	if (timelinePoint.empty())
 		return;
@@ -1627,76 +1484,105 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 		startIndex = 0;
 	}
 
+	std::vector<STOCK::Volume> sortVolumes;
 	STOCK::Volume maxVolume = 0;
 	for (int i = startIndex; i < endIdx; i++)
 	{
+		sortVolumes.push_back(timelinePoint[i].volume);
 		if (timelinePoint[i].volume > maxVolume)
 			maxVolume = timelinePoint[i].volume;
 	}
 
 	if (maxVolume == 0)
 		return;
+	std::sort(sortVolumes.begin(), sortVolumes.end());
+	STOCK::Volume percentile_9 = sortVolumes[sortVolumes.size() * 0.7]; //取70%位置的成交量作为开方缩放的分界点
+
+	// 获取分时成交量汇总数据
+	bool bTimeLinerMode = (g_data.GetCurrentViewMode() == UI_VIEW_TIMELINE);
+	std::map<std::string, ::TickSummary>vecTickSummary;
+	if (bTimeLinerMode && stockInfo != nullptr)
+	{
+		auto strDate = CCommon::GetTodayDate();
+		vecTickSummary = g_data.GetDbManager().LoadTickSummary(stockInfo->code, strDate);
+	}
 
 	const int xSlots = (xAxisPoints > 0) ? xAxisPoints : static_cast<int>(timelinePoint.size());
 	const int fixedGap = 1;
 	int slotWidth = xSlots > 0 ? width / xSlots : 1;
 	int barWidth = max(2, slotWidth - fixedGap);
 	int halfSlot = slotWidth / 2;
+	int normalHight = height * 0.7;
 
 	for (int i = startIndex; i < endIdx; i++)
 	{
 		const auto& item = timelinePoint[i];
+		auto& itemVol = item.volume;
 		int barX = x + static_cast<int>(width / static_cast<float>(xSlots) * i) + halfSlot - barWidth / 2;
-
-		float ratio = static_cast<float>(item.volume) / maxVolume;
-		int barHeight = static_cast<int>(ratio * height);
-		barHeight = max(1, barHeight);
+		int barHeight;
+		if (itemVol < percentile_9)
+		{
+			double sqrtRatio = sqrt(static_cast<double>(itemVol) / percentile_9);
+			barHeight = normalHight * sqrtRatio;
+		}
+		else
+		{
+			float ratio = static_cast<float>(item.volume) / maxVolume;
+			barHeight = max(static_cast<int>(ratio * height), 1);
+		}
 
 		int barY = y + height - barHeight;
 
-		COLORREF color = COLOR_GREEN_DOWN;
-		// K线模式下openPrice>0，使用收盘价vs开盘价判断涨跌，与K线柱颜色一致
-		if (item.openPrice > 0)
+		// TODO : 这里的涨跌颜色判断逻辑可能需要根据实际需求调整，
+		// 分时模式下柱子的颜色分成两部分，从vecTickSummary取当前时间下主动买入和主动卖出的成交量，主动买入为红色，主动卖出为绿色，
+		// 可以直接将高度按比例分配给红色和绿色两部分，比例大的绘制在下方，比例小的绘制在上方，形成一个红绿分层的柱子。
+		// K线模式下使用开盘价和收盘价判断涨跌
+		if (bTimeLinerMode && !vecTickSummary.empty())
 		{
-			if (item.price >= item.openPrice)
-				color = COLOR_RED_UP;
+			std::string strTime = item.time.substr(0, 5);
+
+			auto& curTick = vecTickSummary[strTime];
+			int buyHeght = barHeight * curTick.BuyRatio();
+			int sellHeght = barHeight * curTick.SellRatio();
+
+			if (curTick.netBuy >= 0)
+			{
+				CRect buyRect(barX, barY, barX + barWidth, y + height - sellHeght);
+				CBrush brush(COLOR_RED_UP);
+				memDC.FillRect(buyRect, &brush);
+				CRect sellRect(barX, barY + buyHeght, barX + barWidth, y + height);
+				CBrush brush1(COLOR_GREEN_DOWN);
+				memDC.FillRect(sellRect, &brush1);
+			}
+			else
+			{
+				CRect sellRect(barX, barY, barX + barWidth, y + height - buyHeght);
+				CBrush brush(COLOR_GREEN_DOWN);
+				memDC.FillRect(sellRect, &brush);
+
+				CRect buyRect(barX, barY + sellHeght, barX + barWidth, y + height);
+				CBrush brush1(COLOR_RED_UP);
+				memDC.FillRect(buyRect, &brush1);
+			}
 		}
-		else if (i > 0)
+		else
 		{
-			if (item.price >= timelinePoint[i - 1].price)
-				color = COLOR_RED_UP;
+			COLORREF color = COLOR_GREEN_DOWN;
+			// K线模式下openPrice>0，使用收盘价vs开盘价判断涨跌，与K线柱颜色一致
+			if (item.openPrice > 0)
+			{
+				if (item.price >= item.openPrice)
+					color = COLOR_RED_UP;
+			}
+			else if (i > 0)
+			{
+				if (item.price >= timelinePoint[i - 1].price)
+					color = COLOR_RED_UP;
+			}
+
+			CBrush brush(color);
+			memDC.FillRect(CRect(barX, barY, barX + barWidth, y + height), &brush);
 		}
-
-		CBrush brush(color);
-		memDC.FillRect(CRect(barX, barY, barX + barWidth, y + height), &brush);
-	}
-
-	if (isHoveringVolume && hoveredBarIndex >= 0 && hoveredBarIndex < static_cast<int>(timelinePoint.size()))
-	{
-		const auto& item = timelinePoint[hoveredBarIndex];
-		int barX = x + static_cast<int>(width / static_cast<float>(xSlots) * hoveredBarIndex) + halfSlot - barWidth / 2;
-
-		float ratio = static_cast<float>(timelinePoint[hoveredBarIndex].volume) / maxVolume;
-		int barHeight = static_cast<int>(ratio * height);
-		barHeight = max(1, barHeight);
-		int barY = y + height - barHeight;
-
-		COLORREF color = COLOR_GREEN_DOWN;
-		if (item.openPrice > 0)
-		{
-			if (item.price >= item.openPrice)
-				color = COLOR_RED_UP;
-		}
-		else if (hoveredBarIndex > 0)
-		{
-			if (timelinePoint[hoveredBarIndex].price >= timelinePoint[hoveredBarIndex - 1].price)
-				color = COLOR_RED_UP;
-		}
-
-		CPen highlightPen(PS_SOLID, 2, color);
-		CPen* pOldPen = memDC.SelectObject(&highlightPen);
-		memDC.Rectangle(CRect(barX - 1, barY - 1, barX + barWidth + 1, y + height + 1));
-		memDC.SelectObject(pOldPen);
 	}
 }
 

@@ -9,6 +9,7 @@
 #include "StockDbManager.h"
 #include "TdxTcpClient.h"
 #include <mutex>
+#include "Common.h"
 
 using namespace STOCK;
 
@@ -36,6 +37,13 @@ struct SettingData
 //     std::wstring ToString(bool include_name = true) const;
 //     bool IsEmpty() const;
 // };
+
+// 关联股票信息
+struct RelatedStockInfo
+{
+	std::wstring code{ };        // 关联股票代码（含市场类型前缀）
+	double ratio{ 0.0 };         // 占比，0~1，用户在关联对话框中手动输入
+};
 
 class CDataManager
 {
@@ -106,8 +114,9 @@ public:
 	std::vector<std::wstring> GetStatusBarStockCodes();
 
 	// 关联股票设置
-	std::vector<std::wstring> GetRelatedStocks(const std::wstring& code);
-	void SetRelatedStocks(const std::wstring& code, const std::vector<std::wstring>& related_codes);
+	std::vector<RelatedStockInfo> GetRelatedStocks(const std::wstring& code);   // 返回关联股票信息（含占比）
+	std::vector<std::wstring> GetRelatedStockCodes(const std::wstring& code);   // 仅返回关联股票代码
+	void SetRelatedStocks(const std::wstring& code, const std::vector<RelatedStockInfo>& related);
 
 	// 关联股票均幅统计（最低、最高、实时）
 	AvgDiffStats GetAvgDiffData(const std::wstring& code);
@@ -137,6 +146,9 @@ public:
 	void LoadTodayInnerOuterSnapshots();
 	void LoadChipDistributions();
 	void LoadStockBasicData();
+
+	void SetCurrentViewMode(UIViewMode mode) { m_cur_view_mode = mode; }
+	UIViewMode GetCurrentViewMode() const { return m_cur_view_mode; }
 
 private:
 	bool SaveTimelineCache(const std::wstring& stockCode, const std::vector<STOCK::TimelinePoint>& data);
@@ -170,8 +182,8 @@ private:
 	// 状态栏展示映射表: code -> show_in_statusbar
 	std::map<std::wstring, bool> m_stock_statusbar;
 
-	// 关联股票映射表: code -> related_stock_codes
-	std::map<std::wstring, std::vector<std::wstring>> m_stock_related;
+	// 关联股票映射表: code -> related_stock_info（含占比）
+	std::map<std::wstring, std::vector<RelatedStockInfo>> m_stock_related;
 
 	// 关联股票均幅统计: code -> {min, max, current}
 	std::map<std::wstring, AvgDiffStats> m_avg_diff_stats;
@@ -188,4 +200,6 @@ private:
 	// 每日重置跟踪：记录上次更新日期，跨天时标记待重置
 	std::string m_avg_diff_last_date;
 	bool m_avg_diff_reset_pending{ false };  // 跨天待重置标识，等交易时段获取到今日数据后才执行
+
+	UIViewMode m_cur_view_mode{ UI_VIEW_TIMELINE }; // 当前界面模式
 };

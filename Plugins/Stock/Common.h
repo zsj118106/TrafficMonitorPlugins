@@ -11,7 +11,7 @@ enum UIViewMode
 {
 	UI_VIEW_OVERVIEW = 0,   // 总览界面
 	UI_VIEW_AUCTION,		// 集合竞价界面
-	UI_VIEW_TIMELINE,		// 分时图界面	
+	UI_VIEW_TIMELINE,		// 分时图界面
 	UI_VIEW_MIN5_KLINE,		// 5分钟K线界面
 	UI_VIEW_MIN30_KLINE,	// 30分钟K线界面
 	UI_VIEW_DAY_KLINE,		// 日K线界面
@@ -76,9 +76,8 @@ public:
 	static bool GetURL(const std::wstring& url, std::string& result, bool utf8 = false, LPCTSTR pstrAgent = NULL, const LPCTSTR headers = NULL, DWORD dwHeadersLength = 0);
 
 	//将一个日志信息str_text写入到file_path文件中
-	static void WriteLog(const WORD w, LPCTSTR file_path);
-	static void WriteLog(const char* str_text, LPCTSTR file_path);
-	static void WriteLog(const wchar_t* str_text, LPCTSTR file_path);
+	static void WriteLog(const char* str_text, LPCTSTR file_path = nullptr);
+	static void WriteLog(const wchar_t* str_text, LPCTSTR file_path = nullptr);
 	// 字符串拆分
 	static std::vector<std::string> split(const std::string& str, const char pattern);
 	static std::vector<std::string> split(const std::string& str, const std::string& delimiter);
@@ -122,7 +121,7 @@ public:
 	// >= 5%: 紫色, 0%~5%: 红色, -5%~0%: 绿色, <= -5%: 墨绿色
 	static COLORREF GetProfitLossColor(double percent);
 
-	// 判断当前是否在交易时间（A股：9:30-11:30, 13:00-15:00，非周末）
+	// 判断当前是否在交易时间（A股：9:15-11:30, 12:55-15:00，非周末）
 	static bool IsMarketSession();
 
 	// 判断当前是否在集合竞价时段（9:15-9:30，非周末）
@@ -131,6 +130,8 @@ public:
 	// 将真实时间转换为交易分钟序号（9:30=0, ..., 11:30=119, 13:00=120, ..., 14:59=239）
 	static int GetTradingMinute(time_t t);
 	static int GetTradingMinute(int hour, int minute);
+
+	static std::string GetTodayDate();
 };
 
 //通过构造函数传递一个bool变量的引用，在构造时将其置为true，析构时置为false

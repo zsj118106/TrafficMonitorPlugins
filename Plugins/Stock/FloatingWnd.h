@@ -15,7 +15,6 @@
 #include "OverviewPanel.h"
 #include "IndicatorChart.h"
 #include "StatusBarPanel.h"
-#include "KLineChart.h"
 #include "TimelineChart.h"
 
 // 定义自定义消息
@@ -87,12 +86,10 @@ private:
 	static void SafeShowWindow(CWnd& wnd, bool show);
 	static void SafeSetButtonStyle(CButton& btn, UINT style);
 
-	// TimelineDrawContext / KLineDrawData / LabelInfo 已移至 ChartContext.h，供各图表模块共享
-	// MACDData/MACDCrossSignal/KDJData/WRData/RSIData/PeriodPoint 类型别名已移至各模块类
+	// MACDData/MACDCrossSignal/KDJData/WRData/RSIData 类型别名已移至各模块类
 	// 走势图绘制已移至CTimelineChart
 	// MACD/KDJ/WR/RSI/成交量绘制已移至CIndicatorChart
 	// DrawHeader/DrawTimelinePositionInfo/DrawKLinePositionInfo/DrawKLineInfoPanel 已移至CStatusBarPanel
-	// K线图绘制已移至CKLineChart
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
@@ -111,7 +108,6 @@ private:
 	COverviewPanel m_overviewPanel;
 	CIndicatorChart m_indicatorChart;
 	CStatusBarPanel m_statusBarPanel;
-	CKLineChart m_kLineChart;
 	CTimelineChart m_timelineChart;
 	CButton m_btnTimeLine;
 	CButton m_btnKLine;
@@ -136,9 +132,6 @@ private:
 	CFont m_chipPeakFont;        // 筹码峰按钮小字体
 	std::wstring m_stock_id;
 	UIViewMode m_viewMode{ UI_VIEW_TIMELINE };  // 当前界面视图模式
-	bool m_klineDataLoaded{ false };
-	int m_klinePeriodDays{ 250 };
-	int m_scrollOffset{ 0 };
 	int m_timelineScrollOffset{ -1 };  // 分时图水平滚动偏移，-1表示需要自动滚动到末尾
 	int m_timelineVisibleCount{ 30 };  // 分时图可见数据点数
 	int m_timelineLastTotalPoints{ 0 };  // 上次绘制的数据点数，用于判断新数据追加时是否自动跟随
@@ -153,10 +146,6 @@ private:
 	bool m_isTimelineDragging{ false };
 	CPoint m_timelineDragStartPos;
 	int m_timelineDragStartOffset{ 0 };
-	// K线图鼠标拖动滚动
-	bool m_isKLineDragging{ false };
-	CPoint m_klineDragStartPos;
-	int m_klineDragStartOffset{ 0 };
 	HCURSOR m_hPrevCursor{ NULL };
 	volatile BOOL m_isDestroying;
 	CFont* m_pfont{};
@@ -187,10 +176,7 @@ private:
 	CString m_pendingTradeTime;
 	double m_pendingTradePrice{ 0.0 };
 
-	// 日K线鼠标悬停数据
-	bool m_isHoveringKLine{ false };
-	bool m_isHoveringKLineVolume{ false };
-	bool m_isHoveringKDJ{ false };
+	// 视图选项
 	bool m_showTrendView{ false };
 	bool m_showChipPeak{ false };
 	bool m_showTickDetail{ false };  // 明细(MX)模式：盘口区域显示最近20条成交明细
@@ -201,14 +187,6 @@ private:
 	bool m_showBollBands{ true };
 	volatile bool m_chartDirty{ false };      // 图表数据更新标识（走势图/K线/MACD等），由PostMessage设置
 	volatile bool m_orderBookDirty{ false };  // 盘口数据更新标识（五档/成交/净比等），由共享内存回调设置
-	int m_klineHoveredBarIndex{ -1 };
-	CString m_klineHoverTip;
-	CString m_klineVolumeHoverTip;
-	CString m_klineTrendHoverTip;
-	CString m_kdjHoverTip;
-
-	// 5分钟K线图整点时间标签（X轴：centerX, "h:mm"）
-	std::vector<std::pair<int, CString>> m_min5HourLabels;
 
 	// 总览表行信息（用于双击处理）
 	std::vector<OverviewRowInfo> m_overviewRows;

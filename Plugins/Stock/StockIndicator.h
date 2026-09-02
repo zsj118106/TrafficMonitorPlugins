@@ -60,13 +60,6 @@ public:
 		bool valid;
 	};
 
-	// K线周期高低点信息
-	struct PeriodPoint {
-		int index;
-		STOCK::Price price;
-		std::string day;
-	};
-
 	// ========== 滚动均价计算 ==========
 
 	// 为每个分时数据点计算MA5/MA10/MA20滚动均价（滑动窗口，修改timelinePoint中的ma5/ma10/ma20字段）
@@ -138,13 +131,4 @@ public:
 	// 计算K线RSI序列
 	static std::vector<RSIData> CalculateKLineRSI(const std::vector<STOCK::KLinePoint>& klineData,
 		int period1 = 6, int period2 = 14);
-
-	// ========== K线周期高低点统计 ==========
-
-	// 计算1年/2年/3年的高低点（用于K线图周期标记）
-	// klineData: 完整K线数据；startIndex: 起始索引（限制回看范围）
-	// periodHighs/periodLows: 输出数组，长度3，分别对应1年/2年/3年
-	// useClose: true=使用收盘价，false=使用最高/最低价
-	static void CalculatePeriodHighsLows(const std::vector<STOCK::KLinePoint>& klineData, int startIndex,
-		PeriodPoint periodHighs[3], PeriodPoint periodLows[3], bool useClose = false);
 };

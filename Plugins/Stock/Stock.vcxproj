@@ -264,7 +264,6 @@
     <ClInclude Include="OrderBookPanel.h" />
     <ClInclude Include="OverviewPanel.h" />
     <ClInclude Include="StatusBarPanel.h" />
-    <ClInclude Include="KLineChart.h" />
     <ClInclude Include="TimelineChart.h" />
     <ClInclude Include="DataManager.h" />
     <ClInclude Include="FloatingWnd.h" />
@@ -299,7 +298,6 @@
     <ClCompile Include="OrderBookPanel.cpp" />
     <ClCompile Include="OverviewPanel.cpp" />
     <ClCompile Include="StatusBarPanel.cpp" />
-    <ClCompile Include="KLineChart.cpp" />
     <ClCompile Include="TimelineChart.cpp" />
     <ClCompile Include="DataManager.cpp" />
     <ClCompile Include="FloatingWnd.cpp" />

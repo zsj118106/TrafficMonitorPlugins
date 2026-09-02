@@ -258,7 +258,7 @@ LRESULT CFloatingWnd::OnUpdateStatus(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-CFloatingWnd::CFloatingWnd() : m_isDestroying(FALSE), m_klineDataLoaded(false), m_viewMode(UI_VIEW_TIMELINE)
+CFloatingWnd::CFloatingWnd() : m_isDestroying(FALSE), m_viewMode(UI_VIEW_TIMELINE)
 {
 }
 
@@ -684,8 +684,6 @@ void CFloatingWnd::OnPaint()
 			tlHover.showTrendView = m_showTrendView;
 			tlHover.showChipPeak = m_showChipPeak;
 			tlHover.expandedMode = m_expandedMode;
-			tlHover.klinePeriodDays = m_klinePeriodDays;
-			tlHover.scrollOffset = m_scrollOffset;
 			tlHover.timelineScrollOffset = m_timelineScrollOffset;
 			tlHover.timelineVisibleCount = m_timelineVisibleCount;
 			tlHover.timelineLastTotalPoints = m_timelineLastTotalPoints;
@@ -904,9 +902,9 @@ void CFloatingWnd::OnPaint()
 					visMin = ctx.realtimeData.prevClosePrice - priceLimit;
 				}
 
-				// Y轴固定6等分7根横线：Nice Number算法向上取整本身已提供边距，无需额外除以(DIV_COUNT-2)
+				// Y轴等分数：分时保持6等分（7根刻度线）；5/30分钟、日K走势图刻度线多时标签易拥挤，限制为4等分（最多5根刻度线），刻度仍随价格范围自动缩放
 				// 先把轴边界对齐到实际显示的价格刻度，再让网格线、标签、曲线共用同一组刻度值，避免标签四舍五入后与曲线位置错位
-				const double DIV_COUNT = 6.0;
+				const double DIV_COUNT = (m_viewMode >= UI_VIEW_MIN5_KLINE) ? 4.0 : 6.0;
 				const double MIN_STEP = 0.001;
 				double axisMin, axisMax, niceStep;
 				CStockIndicator::CalcNiceAxisRange(visMin, visMax, DIV_COUNT, MIN_STEP, axisMin, axisMax, niceStep);
@@ -942,8 +940,6 @@ void CFloatingWnd::OnPaint()
 			tlHover.showTrendView = m_showTrendView;
 			tlHover.showChipPeak = m_showChipPeak;
 			tlHover.expandedMode = m_expandedMode;
-			tlHover.klinePeriodDays = m_klinePeriodDays;
-			tlHover.scrollOffset = m_scrollOffset;
 			tlHover.timelineScrollOffset = m_timelineScrollOffset;
 			tlHover.timelineVisibleCount = m_timelineVisibleCount;
 			tlHover.timelineLastTotalPoints = m_timelineLastTotalPoints;
@@ -1107,10 +1103,10 @@ void CFloatingWnd::OnPaint()
 			int relatedBarY = headerHeight;
 			memDC.FillSolidRect(0, relatedBarY, w, relatedBarHeight, RGB(240, 240, 240));
 			memDC.SetBkMode(TRANSPARENT);
-			m_statusBarPanel.DrawRelatedStockBar(memDC, w, relatedBarY, singleBarHeight, m_stock_id, m_viewMode);
+			m_statusBarPanel.DrawRelatedStatusBar(memDC, w, relatedBarY, singleBarHeight, m_stock_id, m_viewMode);
 
 			// 关联模式时在右侧均幅区域中间绘制竖线分隔
-			std::vector<std::wstring> relatedCodes = g_data.GetRelatedStocks(m_stock_id);
+			std::vector<std::wstring> relatedCodes = g_data.GetRelatedStockCodes(m_stock_id);
 			bool isRelatedMode = !relatedCodes.empty();
 			if (isRelatedMode)
 			{
@@ -1197,31 +1193,6 @@ void CFloatingWnd::OnPaint()
 
 	memDC.SelectObject(pOldBitmap);
 }
-
-// ========== MACD指标绘制 ==========
-// 注：以下指标计算函数已移至 CStockIndicator 类（StockIndicator.h/cpp）：
-//   CalcAllRollingAvgPrices/CalcRollingAvgPrice/CalcNiceStep/CalcNiceAxisRange/
-//   CalcNiceAxisRangeSymmetric/CalculateTimelineMACD/CalculateKLineMACD/
-//   DetectMACDCross/GetLatestMACDCross/DetectBuySignal/DetectSellSignal
-// CFloatingWnd 仅保留绘制逻辑。
-
-// 已移至 CIndicatorChart
-
-// 注：CalculateTimelineWR/CalculateKLineWR 已移至 CStockIndicator 类。
-
-// ========== RSI相对强弱指标绘制 ==========
-// 注：CalculateTimelineRSI/CalculateKLineRSI 已移至 CStockIndicator 类。
-
-// ========== K线图公共辅助函数 ==========
-// 已移至 CKLineChart
-
-// 注：CalculatePeriodHighsLows 已移至 CStockIndicator 类。
-
-// ========== K线图绘制 ==========
-// 已移至 CKLineChart
-
-// ========== 走势图绘制 ==========
-// 已移至 CKLineChart
 
 BOOL CFloatingWnd::OnEraseBkgnd(CDC* pDC)
 {
@@ -1506,9 +1477,8 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CFloatingWnd::OnLButtonUp(UINT nFlags, CPoint point)
 {
-	bool wasDragging = m_isTimelineDragging || m_isKLineDragging;
+	bool wasDragging = m_isTimelineDragging;
 	m_isTimelineDragging = false;
-	m_isKLineDragging = false;
 	if (wasDragging)
 	{
 		ReleaseCapture();
@@ -1527,8 +1497,6 @@ void CFloatingWnd::OnLButtonUp(UINT nFlags, CPoint point)
 
 // 已移至 CIndicatorChart
 
-// 已移至 CKLineChart
-
 // 已移至 CTimelineChart
 
 // 已移至 CIndicatorChart
@@ -1537,6 +1505,7 @@ void CFloatingWnd::OnRButtonDown(UINT nFlags, CPoint point)
 {
 	if (m_viewMode != UI_VIEW_OVERVIEW)
 	{
+		g_data.SetCurrentViewMode(UI_VIEW_OVERVIEW);
 		m_viewMode = UI_VIEW_OVERVIEW;
 		m_showChipPeak = false;
 		UpdateModeButtons();
@@ -1545,6 +1514,7 @@ void CFloatingWnd::OnRButtonDown(UINT nFlags, CPoint point)
 	}
 	else
 	{
+		g_data.SetCurrentViewMode(UI_VIEW_TIMELINE);
 		m_viewMode = UI_VIEW_TIMELINE;
 		m_showChipPeak = false;
 		m_showJZCurve = CCommon::IsFundCode(m_stock_id);  // 基金默认显示净值曲线
@@ -1559,7 +1529,7 @@ void CFloatingWnd::OnMouseMove(UINT nFlags, CPoint point)
 	m_mousePos = point;
 
 	// 拖动滚动处理
-	if (m_isTimelineDragging || m_isKLineDragging)
+	if (m_isTimelineDragging)
 	{
 		int dx = 0;
 		if (m_isTimelineDragging)
@@ -1665,21 +1635,6 @@ void CFloatingWnd::OnMouseMove(UINT nFlags, CPoint point)
 				Invalidate();
 			}
 		}
-		else if (m_isKLineDragging)
-		{
-			dx = point.x - m_klineDragStartPos.x;
-			// 每拖动一个 barWidth + gap 像素滚动一根K线
-			const int minBarWidth = 7;
-			const int gap = 1;
-			int deltaBars = dx / (minBarWidth + gap);
-			int newOffset = m_klineDragStartOffset - deltaBars;
-			if (newOffset < 0) newOffset = 0;
-			if (newOffset != m_scrollOffset)
-			{
-				m_scrollOffset = newOffset;
-				Invalidate();
-			}
-		}
 		// 拖动期间不进行 hover 检测，直接返回
 		CWnd::OnMouseMove(nFlags, point);
 		return;
@@ -1710,387 +1665,254 @@ void CFloatingWnd::OnMouseMove(UINT nFlags, CPoint point)
 	m_isHoveringVolume = false;
 	int prevHoveredBarIndex = m_hoveredBarIndex;
 	m_hoveredBarIndex = -1;
-	bool prevHoveringKLine = m_isHoveringKLine;
-	bool prevHoveringKLineVolume = m_isHoveringKLineVolume;
-	int prevKlineHoveredBarIndex = m_klineHoveredBarIndex;
-	m_isHoveringKLine = false;
-	m_isHoveringKLineVolume = false;
-	m_klineHoveredBarIndex = -1;
 
-	if ((m_viewMode == UI_VIEW_DAY_KLINE) && false)  // 日K线模式现在走分时悬停逻辑
+	std::vector<STOCK::TimelinePoint> timelinePoint;
 	{
-		std::vector<STOCK::KLinePoint> klineData;
+		std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
+		auto stockData = g_data.GetStockData(m_stock_id);
+		if (stockData)
 		{
-			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-			auto stockData = g_data.GetStockData(m_stock_id);
-			if (stockData)
+			if (m_viewMode == UI_VIEW_DAY_KLINE)
 			{
+				// 日K线模式：使用日K线数据
 				auto klineObj = stockData->getKLineData();
 				if (klineObj)
 				{
-					klineData = klineObj->data;
+					for (const auto& kp : klineObj->data)
+					{
+						STOCK::TimelinePoint tp;
+						if (kp.day.length() >= 10)
+							tp.time = kp.day.substr(5, 5);  // "MM-DD"
+						else
+							tp.time = kp.day;
+						tp.price = kp.close;
+						tp.openPrice = kp.open;
+						tp.averagePrice = kp.close;
+						tp.volume = kp.volume;
+						tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
+						timelinePoint.push_back(tp);
+					}
 				}
 			}
-		}
-
-		if (!klineData.empty() && point.x >= chartLeft && point.x < chartWidth)
-		{
-			// 使用与绘制完全一致的参数计算（x从chartLeft开始，宽度为chartWidth-chartLeft）
-			const int paddingY = g_data.RDPI(10);
-			CKLineChart::HoverState klineHover;
-			klineHover.isHoveringKLine = m_isHoveringKLine;
-			klineHover.isHoveringKLineVolume = m_isHoveringKLineVolume;
-			klineHover.isHoveringKDJ = m_isHoveringKDJ;
-			klineHover.klineHoveredBarIndex = m_klineHoveredBarIndex;
-			klineHover.klineHoverTip = m_klineHoverTip;
-			klineHover.klineVolumeHoverTip = m_klineVolumeHoverTip;
-			klineHover.klineTrendHoverTip = m_klineTrendHoverTip;
-			klineHover.kdjHoverTip = m_kdjHoverTip;
-			klineHover.showMA = m_showMA;
-			klineHover.showBollBands = m_showBollBands;
-			klineHover.showTrendView = m_showTrendView;
-			klineHover.viewMode = m_viewMode;
-			klineHover.klinePeriodDays = m_klinePeriodDays;
-			klineHover.scrollOffset = m_scrollOffset;
-			klineHover.stockId = m_stock_id;
-			KLineDrawData drawData = m_kLineChart.PrepareKLineDrawData(chartLeft, headerHeight + paddingY, chartWidth - chartLeft, priceChartHeight - paddingY * 2, klineData, klineHover);
-
-			if (point.y >= headerHeight && point.y < headerHeight + priceChartHeight)
+			else if (m_viewMode == UI_VIEW_MIN5_KLINE)
 			{
-				// 鼠标在K线图上 - 使用与绘制一致的参数定位
-				int barIndex = -1;
-				int totalBars = klineData.size() - drawData.finalStartIndex;
-				if (totalBars > 0 && drawData.barWidth + drawData.gap > 0)
+				// 5分钟K线模式：使用5分钟K线数据
+				auto min5KLineObj = stockData->getMin5KLineData();
+				if (min5KLineObj)
 				{
-					barIndex = drawData.finalStartIndex + (point.x - drawData.x) / (drawData.barWidth + drawData.gap);
-					barIndex = max(drawData.finalStartIndex, min(barIndex, (int)klineData.size() - 1));
+					for (const auto& kp : min5KLineObj->data)
+					{
+						STOCK::TimelinePoint tp;
+						auto spacePos = kp.day.find(' ');
+						if (spacePos != std::string::npos && kp.day.length() > spacePos + 5)
+							tp.time = kp.day.substr(spacePos + 1, 5);
+						else if (kp.day.length() >= 5 && kp.day[2] == ':')
+							tp.time = kp.day.substr(0, 5);
+						else
+							tp.time = kp.day;
+						tp.fullTime = kp.day;
+						tp.price = kp.close;
+						tp.openPrice = kp.open;
+						tp.averagePrice = kp.close;
+						tp.volume = kp.volume;
+						tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
+						timelinePoint.push_back(tp);
+					}
 				}
-
-				if (barIndex >= 0)
+			}
+			else if (m_viewMode == UI_VIEW_MIN30_KLINE)
+			{
+				// 30分钟K线模式：使用30分钟K线数据
+				auto min30KLineObj = stockData->getMin30KLineData();
+				if (min30KLineObj)
 				{
-					m_isHoveringKLine = true;
-					m_klineHoveredBarIndex = barIndex;
-
-					const auto& item = klineData[barIndex];
-					m_klineHoverTip.Format(_T("开:%s  收:%s  高:%s  低:%s"),
-						CCommon::FormatFloat(item.open),
-						CCommon::FormatFloat(item.close),
-						CCommon::FormatFloat(item.high),
-						CCommon::FormatFloat(item.low));
-
-					m_klineTrendHoverTip.Format(_T("收:%s  最高:%s  最低:%s"),
-						CCommon::FormatFloat(item.close),
-						CCommon::FormatFloat(item.high),
-						CCommon::FormatFloat(item.low));
-
-					// 同时设置量柱提示，实现同步显示
-					STOCK::Volume volumeLots = item.volume / 100;
-					CString volumeStr = CCommon::FormatVolumeInt(volumeLots);
-					m_klineVolumeHoverTip.Format(_T("成交量:%s"),
-						volumeStr);
+					for (const auto& kp : min30KLineObj->data)
+					{
+						STOCK::TimelinePoint tp;
+						auto spacePos = kp.day.find(' ');
+						if (spacePos != std::string::npos && kp.day.length() > spacePos + 5)
+							tp.time = kp.day.substr(spacePos + 1, 5);
+						else if (kp.day.length() >= 5 && kp.day[2] == ':')
+							tp.time = kp.day.substr(0, 5);
+						else
+							tp.time = kp.day;
+						tp.fullTime = kp.day;
+						tp.price = kp.close;
+						tp.openPrice = kp.open;
+						tp.averagePrice = kp.close;
+						tp.volume = kp.volume;
+						tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
+						timelinePoint.push_back(tp);
+					}
 				}
 			}
 			else
 			{
-				// 统一布局：成交量图紧贴走势图
-				int volumeY = headerHeight + priceChartHeight;
-				if (point.y >= volumeY && point.y < volumeY + volumeChartHeight)
+				auto timelineData = stockData->getTimelineData();
+				if (timelineData)
 				{
-					// 鼠标在量柱图上 - 使用与绘制一致的参数定位
-					int barIndex = -1;
-					int totalBars = klineData.size() - drawData.finalStartIndex;
-					if (totalBars > 0 && drawData.barWidth + drawData.gap > 0)
-					{
-						barIndex = drawData.finalStartIndex + (point.x - drawData.x) / (drawData.barWidth + drawData.gap);
-						barIndex = max(drawData.finalStartIndex, min(barIndex, (int)klineData.size() - 1));
-					}
-
-					if (barIndex >= 0)
-					{
-						m_isHoveringKLineVolume = true;
-						m_klineHoveredBarIndex = barIndex;
-
-						const auto& item = klineData[barIndex];
-						STOCK::Volume volumeLots = item.volume / 100;
-						CString volumeStr = CCommon::FormatVolumeInt(volumeLots);
-						m_klineVolumeHoverTip.Format(_T("成交量:%s"),
-							volumeStr);
-
-						// 同时设置K线提示，实现同步显示
-						m_klineHoverTip.Format(_T("开:%s  收:%s  高:%s  低:%s"),
-							CCommon::FormatFloat(item.open),
-							CCommon::FormatFloat(item.close),
-							CCommon::FormatFloat(item.high),
-							CCommon::FormatFloat(item.low));
-
-						m_klineTrendHoverTip.Format(_T("收:%s  最高:%s  最低:%s"),
-							CCommon::FormatFloat(item.close),
-							CCommon::FormatFloat(item.high),
-							CCommon::FormatFloat(item.low));
-					}
+					timelinePoint = timelineData->data;
 				}
-			}
-
-			// 只在悬停状态变化时重绘图表区域，避免按钮闪烁
-			bool hoverChanged = (m_isHoveringKLine != prevHoveringKLine ||
-				m_isHoveringKLineVolume != prevHoveringKLineVolume ||
-				m_klineHoveredBarIndex != prevKlineHoveredBarIndex);
-			if (hoverChanged)
-			{
-				InvalidateRect(CRect(0, headerHeight, chartWidth, rect.Height()));
 			}
 		}
 	}
-	else
+
+	if (!timelinePoint.empty() && point.x >= chartLeft && point.x < chartWidth)
 	{
-		std::vector<STOCK::TimelinePoint> timelinePoint;
+		// 计算可见范围（与OnPaint一致）
+		int totalPoints = static_cast<int>(timelinePoint.size());
+		int visibleCount = min(m_timelineVisibleCount, totalPoints);
+		int maxOffset = max(0, totalPoints - visibleCount);
+		// 自动跟随：如果当前在末尾或需要自动滚动
+		if (m_timelineScrollOffset < 0 || m_timelineScrollOffset >= maxOffset)
+			m_timelineScrollOffset = maxOffset;
+		int startIndex = max(0, min(m_timelineScrollOffset, maxOffset));
+
+		// 构建可见子向量并计算MA值（与OnPaint一致）
+		CStockIndicator::CalcAllRollingAvgPrices(timelinePoint);
+		auto subStart = timelinePoint.begin() + startIndex;
+		auto subEnd = timelinePoint.begin() + startIndex + visibleCount;
+		std::vector<STOCK::TimelinePoint> subTimeline(subStart, subEnd);
+
+		// 鼠标坐标减去图表左边界，对应到分时图内部坐标
+		int adjX = point.x - chartLeft;
+		int effectiveWidth = chartWidth - chartLeft;
+		// 按索引比例计算鼠标对应的可见数据索引
+		// 分时模式X轴基于m_timelineVisibleCount固定格数，K线模式基于实际数据点数
+		int xSlotCount = (m_viewMode >= UI_VIEW_MIN5_KLINE) ? visibleCount : m_timelineVisibleCount;
+		int relIndex = static_cast<int>(adjX * static_cast<float>(xSlotCount) / effectiveWidth);
+		relIndex = max(0, min(relIndex, visibleCount - 1));
+
+		if (relIndex >= 0 && relIndex < static_cast<int>(subTimeline.size()))
 		{
-			std::lock_guard<std::mutex> lock(Stock::Instance().m_stockDataMutex);
-			auto stockData = g_data.GetStockData(m_stock_id);
-			if (stockData)
+			m_isHoveringVolume = true;
+			m_hoveredBarIndex = relIndex;
+			m_hoveredData = subTimeline[relIndex];
+
+			// 保存hover点的MA值
+			m_hoverMa1 = m_hoveredData.price;
+			m_hoverMa5 = m_hoveredData.ma5;
+			m_hoverMa10 = m_hoveredData.ma10;
+			m_hoverMa20 = m_hoveredData.ma20;
+			// 保存前一点MA值（用于箭头方向）
+			m_hoverPrevMa1 = 0; m_hoverPrevMa5 = 0; m_hoverPrevMa10 = 0; m_hoverPrevMa20 = 0;
+			if (relIndex > 0)
 			{
-				if (m_viewMode == UI_VIEW_DAY_KLINE)
+				m_hoverPrevMa1 = subTimeline[relIndex - 1].price;
+				m_hoverPrevMa5 = subTimeline[relIndex - 1].ma5;
+				m_hoverPrevMa10 = subTimeline[relIndex - 1].ma10;
+				m_hoverPrevMa20 = subTimeline[relIndex - 1].ma20;
+			}
+
+			CString timeStr(m_hoveredData.time.c_str());
+			STOCK::Volume volumeLots = m_hoveredData.volume / 100;
+			CString volumeStr = CCommon::FormatVolumeInt(volumeLots);
+
+			double amount = static_cast<double>(m_hoveredData.volume) * m_hoveredData.price;
+			CString amountStr = CCommon::FormatAmount(amount);
+
+			m_hoverTip.Format(_T("%s %s %s"), timeStr, volumeStr, amountStr);
+			// 设置量柱图标题栏悬停提示：显示鼠标指向位置的分量和分额
+			m_timelineVolumeTitleTip.Format(_T("分量:%s 分额:%s"), volumeStr, amountStr);
+
+			// 设置MACD/KDJ/W&R/RSI标题栏悬停提示
+			// MACD固定显示，始终计算悬停提示（用完整数据确保EMA收敛）
+			{
+				int shortP = 12, longP = 26, signalP = 9;
+				if (m_viewMode == UI_VIEW_MIN5_KLINE)
 				{
-					// 日K线模式：使用日K线数据
-					auto klineObj = stockData->getKLineData();
-					if (klineObj)
-					{
-						for (const auto& kp : klineObj->data)
-						{
-							STOCK::TimelinePoint tp;
-							if (kp.day.length() >= 10)
-								tp.time = kp.day.substr(5, 5);  // "MM-DD"
-							else
-								tp.time = kp.day;
-							tp.price = kp.close;
-							tp.openPrice = kp.open;
-							tp.averagePrice = kp.close;
-							tp.volume = kp.volume;
-							tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
-							timelinePoint.push_back(tp);
-						}
-					}
+					shortP = 7; longP = 15; signalP = 5;
 				}
-				else if (m_viewMode == UI_VIEW_MIN5_KLINE)
+				else if (m_viewMode == UI_VIEW_TIMELINE)
 				{
-					// 5分钟K线模式：使用5分钟K线数据
-					auto min5KLineObj = stockData->getMin5KLineData();
-					if (min5KLineObj)
-					{
-						for (const auto& kp : min5KLineObj->data)
-						{
-							STOCK::TimelinePoint tp;
-							auto spacePos = kp.day.find(' ');
-							if (spacePos != std::string::npos && kp.day.length() > spacePos + 5)
-								tp.time = kp.day.substr(spacePos + 1, 5);
-							else if (kp.day.length() >= 5 && kp.day[2] == ':')
-								tp.time = kp.day.substr(0, 5);
-							else
-								tp.time = kp.day;
-							tp.fullTime = kp.day;
-							tp.price = kp.close;
-							tp.openPrice = kp.open;
-							tp.averagePrice = kp.close;
-							tp.volume = kp.volume;
-							tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
-							timelinePoint.push_back(tp);
-						}
-					}
+					shortP = 6; longP = 12; signalP = 4;
 				}
-				else if (m_viewMode == UI_VIEW_MIN30_KLINE)
+				auto macdData = CStockIndicator::CalculateTimelineMACD(timelinePoint, shortP, longP, signalP);
+				int globalIdx = startIndex + relIndex;
+				if (globalIdx < static_cast<int>(macdData.size()) && macdData[globalIdx].valid)
 				{
-					// 30分钟K线模式：使用30分钟K线数据
-					auto min30KLineObj = stockData->getMin30KLineData();
-					if (min30KLineObj)
-					{
-						for (const auto& kp : min30KLineObj->data)
-						{
-							STOCK::TimelinePoint tp;
-							auto spacePos = kp.day.find(' ');
-							if (spacePos != std::string::npos && kp.day.length() > spacePos + 5)
-								tp.time = kp.day.substr(spacePos + 1, 5);
-							else if (kp.day.length() >= 5 && kp.day[2] == ':')
-								tp.time = kp.day.substr(0, 5);
-							else
-								tp.time = kp.day;
-							tp.fullTime = kp.day;
-							tp.price = kp.close;
-							tp.openPrice = kp.open;
-							tp.averagePrice = kp.close;
-							tp.volume = kp.volume;
-							tp.amount = static_cast<STOCK::Amount>(kp.volume) * kp.close;
-							timelinePoint.push_back(tp);
-						}
-					}
-				}
-				else
-				{
-					auto timelineData = stockData->getTimelineData();
-					if (timelineData)
-					{
-						timelinePoint = timelineData->data;
-					}
+					auto formatMACDValue = [](double val) -> CString {
+						CString s;
+						double absVal = std::abs(val);
+						if (absVal < 0.001 && absVal > 0)
+							s.Format(_T("%.5f"), val);
+						else if (absVal < 0.01)
+							s.Format(_T("%.4f"), val);
+						else
+							s.Format(_T("%.3f"), val);
+						return s;
+						};
+					m_timelineMacdTitleTip.Format(_T("DIF:%s DEA:%s"), formatMACDValue(macdData[globalIdx].dif), formatMACDValue(macdData[globalIdx].dea));
 				}
 			}
-		}
-
-		if (!timelinePoint.empty() && point.x >= chartLeft && point.x < chartWidth)
-		{
-			// 计算可见范围（与OnPaint一致）
-			int totalPoints = static_cast<int>(timelinePoint.size());
-			int visibleCount = min(m_timelineVisibleCount, totalPoints);
-			int maxOffset = max(0, totalPoints - visibleCount);
-			// 自动跟随：如果当前在末尾或需要自动滚动
-			if (m_timelineScrollOffset < 0 || m_timelineScrollOffset >= maxOffset)
-				m_timelineScrollOffset = maxOffset;
-			int startIndex = max(0, min(m_timelineScrollOffset, maxOffset));
-
-			// 构建可见子向量并计算MA值（与OnPaint一致）
-			CStockIndicator::CalcAllRollingAvgPrices(timelinePoint);
-			auto subStart = timelinePoint.begin() + startIndex;
-			auto subEnd = timelinePoint.begin() + startIndex + visibleCount;
-			std::vector<STOCK::TimelinePoint> subTimeline(subStart, subEnd);
-
-			// 鼠标坐标减去图表左边界，对应到分时图内部坐标
-			int adjX = point.x - chartLeft;
-			int effectiveWidth = chartWidth - chartLeft;
-			// 按索引比例计算鼠标对应的可见数据索引
-			// 分时模式X轴基于m_timelineVisibleCount固定格数，K线模式基于实际数据点数
-			int xSlotCount = (m_viewMode >= UI_VIEW_MIN5_KLINE) ? visibleCount : m_timelineVisibleCount;
-			int relIndex = static_cast<int>(adjX * static_cast<float>(xSlotCount) / effectiveWidth);
-			relIndex = max(0, min(relIndex, visibleCount - 1));
-
-			if (relIndex >= 0 && relIndex < static_cast<int>(subTimeline.size()))
+			if (m_timelineIndicator == TimelineIndicator::KDJ)
 			{
-				m_isHoveringVolume = true;
-				m_hoveredBarIndex = relIndex;
-				m_hoveredData = subTimeline[relIndex];
-
-				// 保存hover点的MA值
-				m_hoverMa1 = m_hoveredData.price;
-				m_hoverMa5 = m_hoveredData.ma5;
-				m_hoverMa10 = m_hoveredData.ma10;
-				m_hoverMa20 = m_hoveredData.ma20;
-				// 保存前一点MA值（用于箭头方向）
-				m_hoverPrevMa1 = 0; m_hoverPrevMa5 = 0; m_hoverPrevMa10 = 0; m_hoverPrevMa20 = 0;
-				if (relIndex > 0)
+				// 5分钟K线用8,3,3参数，分时(1分钟)用7,3,3参数，30分钟和日K用默认9,3,3
+				int kdjN = 9, kdjM1 = 3, kdjM2 = 3;
+				if (m_viewMode == UI_VIEW_MIN5_KLINE)
 				{
-					m_hoverPrevMa1 = subTimeline[relIndex - 1].price;
-					m_hoverPrevMa5 = subTimeline[relIndex - 1].ma5;
-					m_hoverPrevMa10 = subTimeline[relIndex - 1].ma10;
-					m_hoverPrevMa20 = subTimeline[relIndex - 1].ma20;
+					kdjN = 8; kdjM1 = 3; kdjM2 = 3;
 				}
-
-				CString timeStr(m_hoveredData.time.c_str());
-				STOCK::Volume volumeLots = m_hoveredData.volume / 100;
-				CString volumeStr = CCommon::FormatVolumeInt(volumeLots);
-
-				double amount = static_cast<double>(m_hoveredData.volume) * m_hoveredData.price;
-				CString amountStr = CCommon::FormatAmount(amount);
-
-				m_hoverTip.Format(_T("%s %s %s"), timeStr, volumeStr, amountStr);
-				// 设置量柱图标题栏悬停提示：显示鼠标指向位置的分量和分额
-				m_timelineVolumeTitleTip.Format(_T("分量:%s 分额:%s"), volumeStr, amountStr);
-
-				// 设置MACD/KDJ/W&R/RSI标题栏悬停提示
-				// MACD固定显示，始终计算悬停提示（用完整数据确保EMA收敛）
+				else if (m_viewMode == UI_VIEW_TIMELINE)
 				{
-					int shortP = 12, longP = 26, signalP = 9;
-					if (m_viewMode == UI_VIEW_MIN5_KLINE)
-					{
-						shortP = 7; longP = 15; signalP = 5;
-					}
-					else if (m_viewMode == UI_VIEW_TIMELINE)
-					{
-						shortP = 6; longP = 12; signalP = 4;
-					}
-					auto macdData = CStockIndicator::CalculateTimelineMACD(timelinePoint, shortP, longP, signalP);
-					int globalIdx = startIndex + relIndex;
-					if (globalIdx < static_cast<int>(macdData.size()) && macdData[globalIdx].valid)
-					{
-						auto formatMACDValue = [](double val) -> CString {
-							CString s;
-							double absVal = std::abs(val);
-							if (absVal < 0.001 && absVal > 0)
-								s.Format(_T("%.5f"), val);
-							else if (absVal < 0.01)
-								s.Format(_T("%.4f"), val);
-							else
-								s.Format(_T("%.3f"), val);
-							return s;
-							};
-						m_timelineMacdTitleTip.Format(_T("DIF:%s DEA:%s"), formatMACDValue(macdData[globalIdx].dif), formatMACDValue(macdData[globalIdx].dea));
-					}
+					kdjN = 7; kdjM1 = 3; kdjM2 = 3;
 				}
-				if (m_timelineIndicator == TimelineIndicator::KDJ)
+				auto kdjData = CStockIndicator::CalculateTimelineKDJ(subTimeline, kdjN, kdjM1, kdjM2);
+				if (relIndex < static_cast<int>(kdjData.size()) && kdjData[relIndex].valid)
 				{
-					// 5分钟K线用8,3,3参数，分时(1分钟)用7,3,3参数，30分钟和日K用默认9,3,3
-					int kdjN = 9, kdjM1 = 3, kdjM2 = 3;
-					if (m_viewMode == UI_VIEW_MIN5_KLINE)
-					{
-						kdjN = 8; kdjM1 = 3; kdjM2 = 3;
-					}
-					else if (m_viewMode == UI_VIEW_TIMELINE)
-					{
-						kdjN = 7; kdjM1 = 3; kdjM2 = 3;
-					}
-					auto kdjData = CStockIndicator::CalculateTimelineKDJ(subTimeline, kdjN, kdjM1, kdjM2);
-					if (relIndex < static_cast<int>(kdjData.size()) && kdjData[relIndex].valid)
-					{
-						m_timelineKdjTitleTip.Format(_T("K:%.1f D:%.1f J:%.1f"), kdjData[relIndex].k, kdjData[relIndex].d, kdjData[relIndex].j);
-					}
-					m_timelineWrTitleTip.Empty();
-					m_timelineRsiTitleTip.Empty();
+					m_timelineKdjTitleTip.Format(_T("K:%.1f D:%.1f J:%.1f"), kdjData[relIndex].k, kdjData[relIndex].d, kdjData[relIndex].j);
 				}
-				else if (m_timelineIndicator == TimelineIndicator::WR)
+				m_timelineWrTitleTip.Empty();
+				m_timelineRsiTitleTip.Empty();
+			}
+			else if (m_timelineIndicator == TimelineIndicator::WR)
+			{
+				// WR悬停提示
+				auto wrData = CStockIndicator::CalculateTimelineWR(subTimeline);
+				if (relIndex < static_cast<int>(wrData.size()) && wrData[relIndex].valid)
 				{
-					// WR悬停提示
-					auto wrData = CStockIndicator::CalculateTimelineWR(subTimeline);
-					if (relIndex < static_cast<int>(wrData.size()) && wrData[relIndex].valid)
-					{
-						m_timelineWrTitleTip.Format(_T("WR6:%.1f WR14:%.1f"), wrData[relIndex].wr1, wrData[relIndex].wr2);
-					}
-					m_timelineKdjTitleTip.Empty();
-					m_timelineRsiTitleTip.Empty();
+					m_timelineWrTitleTip.Format(_T("WR6:%.1f WR14:%.1f"), wrData[relIndex].wr1, wrData[relIndex].wr2);
 				}
-				else if (m_timelineIndicator == TimelineIndicator::RSI)
+				m_timelineKdjTitleTip.Empty();
+				m_timelineRsiTitleTip.Empty();
+			}
+			else if (m_timelineIndicator == TimelineIndicator::RSI)
+			{
+				auto rsiData = CStockIndicator::CalculateTimelineRSI(subTimeline);
+				if (relIndex < static_cast<int>(rsiData.size()) && rsiData[relIndex].valid)
 				{
-					auto rsiData = CStockIndicator::CalculateTimelineRSI(subTimeline);
-					if (relIndex < static_cast<int>(rsiData.size()) && rsiData[relIndex].valid)
-					{
-						m_timelineRsiTitleTip.Format(_T("RSI6:%.1f RSI14:%.1f"), rsiData[relIndex].rsi1, rsiData[relIndex].rsi2);
-					}
-					m_timelineKdjTitleTip.Empty();
-					m_timelineWrTitleTip.Empty();
+					m_timelineRsiTitleTip.Format(_T("RSI6:%.1f RSI14:%.1f"), rsiData[relIndex].rsi1, rsiData[relIndex].rsi2);
 				}
-				else
-				{
-					m_timelineKdjTitleTip.Empty();
-					m_timelineWrTitleTip.Empty();
-					m_timelineRsiTitleTip.Empty();
-				}
+				m_timelineKdjTitleTip.Empty();
+				m_timelineWrTitleTip.Empty();
 			}
 			else
 			{
-				m_isHoveringVolume = false;
-				m_hoveredBarIndex = -1;
-				m_hoverTip.Empty();
-				m_timelineVolumeTitleTip.Empty();
-				m_timelineMacdTitleTip.Empty();
 				m_timelineKdjTitleTip.Empty();
 				m_timelineWrTitleTip.Empty();
 				m_timelineRsiTitleTip.Empty();
-				m_hoverMa1 = 0; m_hoverMa5 = 0; m_hoverMa10 = 0; m_hoverMa20 = 0;
-				m_hoverPrevMa1 = 0; m_hoverPrevMa5 = 0; m_hoverPrevMa10 = 0; m_hoverPrevMa20 = 0;
 			}
+		}
+		else
+		{
+			m_isHoveringVolume = false;
+			m_hoveredBarIndex = -1;
+			m_hoverTip.Empty();
+			m_timelineVolumeTitleTip.Empty();
+			m_timelineMacdTitleTip.Empty();
+			m_timelineKdjTitleTip.Empty();
+			m_timelineWrTitleTip.Empty();
+			m_timelineRsiTitleTip.Empty();
+			m_hoverMa1 = 0; m_hoverMa5 = 0; m_hoverMa10 = 0; m_hoverMa20 = 0;
+			m_hoverPrevMa1 = 0; m_hoverPrevMa5 = 0; m_hoverPrevMa10 = 0; m_hoverPrevMa20 = 0;
+		}
 
-			// 只在悬停状态变化时重绘图表区域，避免按钮闪烁
-			bool hoverChanged = (m_isHoveringVolume != (prevHoveredBarIndex >= 0) ||
-				m_hoveredBarIndex != prevHoveredBarIndex);
-			if (hoverChanged)
-			{
-				InvalidateRect(CRect(0, headerHeight, chartWidth, rect.Height()));
-			}
+		// 只在悬停状态变化时重绘图表区域，避免按钮闪烁
+		bool hoverChanged = (m_isHoveringVolume != (prevHoveredBarIndex >= 0) ||
+			m_hoveredBarIndex != prevHoveredBarIndex);
+		if (hoverChanged)
+		{
+			InvalidateRect(CRect(0, headerHeight, chartWidth, rect.Height()));
 		}
 	}
 }
@@ -2124,7 +1946,6 @@ void CFloatingWnd::ToggleKLineMode()
 	m_viewMode = (m_viewMode == UI_VIEW_DAY_KLINE) ? UI_VIEW_TIMELINE : UI_VIEW_DAY_KLINE;
 	m_showBollBands = (m_viewMode != UI_VIEW_DAY_KLINE);
 	m_btnBoll.SetWindowText(_T("BL"));
-	m_scrollOffset = 0;
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	m_timelineVisibleCount = 30;  // 切回分时显示最新走势
 	m_showTrendView = false;
@@ -2137,7 +1958,6 @@ void CFloatingWnd::ToggleKLineMode()
 
 	if (m_viewMode == UI_VIEW_DAY_KLINE)
 	{
-		// 不再重置m_klineDataLoaded，因为已在启动时预加载
 		EnsureChipPeakData();
 	}
 	Invalidate();
@@ -2410,12 +2230,8 @@ BOOL CFloatingWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CFloatingWnd::OnBnClickedCallAuctionBtn()
 {
-	if (m_viewMode == UI_VIEW_AUCTION)
-	{
-		// 已经在竞价模式，切回分时模式
-		m_viewMode = UI_VIEW_TIMELINE;
-	}
-	else
+	g_data.SetCurrentViewMode(UI_VIEW_AUCTION);
+	if (!m_viewMode == UI_VIEW_AUCTION)
 	{
 		// 切换到竞价模式
 		m_viewMode = UI_VIEW_AUCTION;
@@ -2425,14 +2241,15 @@ void CFloatingWnd::OnBnClickedCallAuctionBtn()
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
 		ResetHoverState();
 		m_timelinePriceTitleTip.Empty();
+		UpdateModeButtons();
+		UpdatePeriodComboVisibility();
+		Invalidate();
 	}
-	UpdateModeButtons();
-	UpdatePeriodComboVisibility();
-	Invalidate();
 }
 
 void CFloatingWnd::OnBnClickedTimeLineBtn()
 {
+	g_data.SetCurrentViewMode(UI_VIEW_TIMELINE);
 	if (m_viewMode != UI_VIEW_TIMELINE)
 	{
 		SetTimelineModeDefaults();
@@ -2445,17 +2262,13 @@ void CFloatingWnd::OnBnClickedTimeLineBtn()
 
 void CFloatingWnd::OnBnClickedKLineBtn()
 {
+	g_data.SetCurrentViewMode(UI_VIEW_DAY_KLINE);
 	if (m_viewMode != UI_VIEW_DAY_KLINE)
 	{
 		SetDayKLineModeDefaults();
 		UpdateModeButtons();
 		UpdatePeriodComboVisibility();
 		EnsureChipPeakData();
-		Invalidate();
-	}
-	else if (m_showTrendView)
-	{
-		m_showTrendView = false;
 		Invalidate();
 	}
 }
@@ -2677,14 +2490,9 @@ void CFloatingWnd::EnsureChipPeakData()
 
 void CFloatingWnd::ResetHoverState()
 {
-	m_isHoveringKLine = false;
-	m_isHoveringKLineVolume = false;
 	m_isHoveringVolume = false;
-	m_klineHoveredBarIndex = -1;
 	m_hoveredBarIndex = -1;
-	m_klineHoverTip.Empty();
 	m_hoverTip.Empty();
-	m_klineTrendHoverTip.Empty();
 	m_timelineVolumeTitleTip.Empty();
 	m_timelineMacdTitleTip.Empty();
 	m_timelineKdjTitleTip.Empty();
@@ -2699,7 +2507,6 @@ void CFloatingWnd::SetTimelineModeDefaults()
 	m_showTrendView = false;
 	m_showChipPeak = false;
 	m_showJZCurve = CCommon::IsFundCode(m_stock_id);  // 基金默认显示净值曲线
-	m_scrollOffset = 0;
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;  // 显示最新走势
 	ResetHoverState();
@@ -2708,13 +2515,12 @@ void CFloatingWnd::SetTimelineModeDefaults()
 void CFloatingWnd::SetDayKLineModeDefaults()
 {
 	m_viewMode = UI_VIEW_DAY_KLINE;
-	m_showBollBands = false;
+	m_showBollBands = true;
 	m_btnBoll.SetWindowText(_T("BL"));
 	m_showTrendView = false;  // 日K默认显示K线图
 	m_showChipPeak = false;
 	m_showJZCurve = false;
-	m_showMA = true;
-	m_scrollOffset = 0;
+	m_showMA = false;
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;  // 日K线初始缩放到最大，显示最新40根
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	ResetHoverState();
@@ -2728,7 +2534,6 @@ void CFloatingWnd::SetMin5KLineModeDefaults()
 	m_showMA = false;
 	m_showJZCurve = false;
 	m_showChipPeak = false;
-	m_scrollOffset = 0;
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;  // 初始化缩放，显示最新40个数据点
 	ResetHoverState();
@@ -2737,12 +2542,11 @@ void CFloatingWnd::SetMin5KLineModeDefaults()
 void CFloatingWnd::SetMin30KLineModeDefaults()
 {
 	m_viewMode = UI_VIEW_MIN30_KLINE;
-	m_showBollBands = false;
+	m_showBollBands = true;
 	m_btnBoll.SetWindowText(_T("BL"));
-	m_showMA = true;
+	m_showMA = false;
 	m_showJZCurve = false;
 	m_showChipPeak = false;  // 默认展示盘口，与5分钟视图保持一致
-	m_scrollOffset = 0;
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_30MIN;  // 初始化缩放，显示最新16个数据点
 	ResetHoverState();
@@ -2763,38 +2567,31 @@ void CFloatingWnd::OnBnClickedMABtn()
 
 void CFloatingWnd::OnBnClickedMin5KLineBtn()
 {
+	g_data.SetCurrentViewMode(UI_VIEW_MIN5_KLINE);
+
 	if (m_viewMode != UI_VIEW_MIN5_KLINE)
 	{
 		// 切换到5分钟K线模式
 		SetMin5KLineModeDefaults();
+		UpdateModeButtons();
+		UpdatePeriodComboVisibility();
+		EnsureChipPeakData();
+		Invalidate();
 	}
-	else
-	{
-		// 退出5分钟K线模式，回到分时模式
-		SetTimelineModeDefaults();
-	}
-	UpdateModeButtons();
-	UpdatePeriodComboVisibility();
-	EnsureChipPeakData();
-	Invalidate();
 }
 
 void CFloatingWnd::OnBnClickedMin30KLineBtn()
 {
+	g_data.SetCurrentViewMode(UI_VIEW_MIN30_KLINE);
 	if (m_viewMode != UI_VIEW_MIN30_KLINE)
 	{
 		// 切换到30分钟K线模式
 		SetMin30KLineModeDefaults();
+		UpdateModeButtons();
+		UpdatePeriodComboVisibility();
+		EnsureChipPeakData();
+		Invalidate();
 	}
-	else
-	{
-		// 退出30分钟K线模式，回到分时模式
-		SetTimelineModeDefaults();
-	}
-	UpdateModeButtons();
-	UpdatePeriodComboVisibility();
-	EnsureChipPeakData();
-	Invalidate();
 }
 
 void CFloatingWnd::OnBnClickedBollBtn()

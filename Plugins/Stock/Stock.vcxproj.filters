@@ -123,9 +123,6 @@
     <ClInclude Include="StatusBarPanel.h">
       <Filter>FloatingWnd</Filter>
     </ClInclude>
-    <ClInclude Include="KLineChart.h">
-      <Filter>FloatingWnd</Filter>
-    </ClInclude>
     <ClInclude Include="TimelineChart.h">
       <Filter>FloatingWnd</Filter>
     </ClInclude>
@@ -216,9 +213,6 @@
       <Filter>FloatingWnd</Filter>
     </ClCompile>
     <ClCompile Include="StatusBarPanel.cpp">
-      <Filter>FloatingWnd</Filter>
-    </ClCompile>
-    <ClCompile Include="KLineChart.cpp">
       <Filter>FloatingWnd</Filter>
     </ClCompile>
     <ClCompile Include="TimelineChart.cpp">

@@ -59,6 +59,9 @@ public:
 	std::vector<STOCK::PriceVolumeStat> LoadPriceVolumeStats(const std::wstring& stockCode,
 		const std::string& tradeDate, int buyOrSell = -1);
 
+	//按股票名称和日期统计每分钟的交易记录数量（仅包含主动买/主动卖，排除中性、集合竞价、尾盘定价）
+	std::map<std::string, STOCK::TickSummary> LoadTickSummary(const std::wstring& stockCode, const std::string& tradeDate);
+
 	// 内外盘快照
 	bool SaveInnerOuterSnapshot(const std::wstring& stockCode, time_t timestamp,
 		STOCK::Volume innerVolume, STOCK::Volume outerVolume);

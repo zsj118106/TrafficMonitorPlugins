@@ -462,30 +462,3 @@ std::vector<CStockIndicator::RSIData> CStockIndicator::CalculateKLineRSI(const s
 	}
 	return result;
 }
-
-// ========== K线周期高低点统计 ==========
-
-void CStockIndicator::CalculatePeriodHighsLows(const std::vector<STOCK::KLinePoint>& klineData, int startIndex,
-	PeriodPoint periodHighs[3], PeriodPoint periodLows[3], bool useClose)
-{
-	const int DAYS_PER_YEAR = 250;
-
-	for (int p = 1; p <= 3; p++)
-	{
-		int rangeEnd = static_cast<int>(klineData.size()) - (p - 1) * DAYS_PER_YEAR;
-		int rangeStart = max(startIndex, static_cast<int>(klineData.size()) - p * DAYS_PER_YEAR);
-		if (rangeStart >= rangeEnd) continue;
-
-		STOCK::Price hh = 0, ll = (std::numeric_limits<STOCK::Price>::max)();
-		int hIdx = -1, lIdx = -1;
-		for (int i = rangeStart; i < rangeEnd; i++)
-		{
-			STOCK::Price price = useClose ? klineData[i].close : klineData[i].high;
-			STOCK::Price lowPrice = useClose ? klineData[i].close : klineData[i].low;
-			if (price > 0 && price > hh) { hh = price; hIdx = i; }
-			if (lowPrice > 0 && lowPrice < ll) { ll = lowPrice; lIdx = i; }
-		}
-		periodHighs[p - 1] = { hIdx, hh, hIdx >= 0 ? klineData[hIdx].day : "" };
-		periodLows[p - 1] = { lIdx, ll, lIdx >= 0 ? klineData[lIdx].day : "" };
-	}
-}

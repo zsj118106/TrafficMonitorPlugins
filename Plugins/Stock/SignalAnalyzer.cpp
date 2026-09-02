@@ -1,9 +1,12 @@
 #include "pch.h"
 #include "SignalAnalyzer.h"
 #include "StockDef.h"
+#include "DataManager.h"
+#include "ChartColors.h"
 #include <cmath>
 #include <map>
 #include <set>
+#include "DataManager.h"
 
 namespace
 {
@@ -1750,6 +1753,155 @@ STOCK::TrendResult CSignalAnalyzer::CalcTrend(
 	return result;
 }
 
+// ========== 盘口趋势行分段文本计算 ==========
+// 原 COrderBookPanel::DrawTrend 中的数据计算/文本组装逻辑，抽离至此与图形绘制分离
+// 仅传入最新行情（含股票代码），内部依次计算 日K→30分钟→5分钟→分时 四个周期趋势
+// 每个区间均附带 回调/反弹/低吸/高抛 后缀（由下一级小周期共振判定）
+std::vector<CSignalAnalyzer::TextSeg> CSignalAnalyzer::CalcTrendSegments(
+	const STOCK::StockInfo& stockInfo)
+{
+	auto stockDataForTrend = g_data.GetStockData(stockInfo.code);
+	auto dayData = stockDataForTrend ? stockDataForTrend->getKLineData() : nullptr;
+	auto min30Data = stockDataForTrend ? stockDataForTrend->getMin30KLineData() : nullptr;
+	auto min5Data = stockDataForTrend ? stockDataForTrend->getMin5KLineData() : nullptr;
+	auto timelineData = stockDataForTrend ? stockDataForTrend->getTimelineData() : nullptr;
+
+	// 依次计算四个周期的趋势方向（日K/30分钟/5分钟/分时）
+	STOCK::TrendDir dirDay = STOCK::TrendDir::DIR_SIDE;
+	STOCK::TrendDir dir30 = STOCK::TrendDir::DIR_SIDE;
+	STOCK::TrendDir dir5 = STOCK::TrendDir::DIR_SIDE;
+	STOCK::TrendDir dirCur = STOCK::TrendDir::DIR_SIDE;
+
+	bool validDay = false, valid30 = false, valid5 = false, validCur = false;
+
+	std::vector<STOCK::Bar>barsDay, bars30, bars5;  // 日K视图双周期综合判定时复用
+	// 日K趋势（波段结构判定，回看25根）
+	if (dayData && dayData->data.size() >= TREND_30M_LOOKBACK)
+	{
+		barsDay.reserve(dayData->data.size());
+		for (const auto& kp : dayData->data) barsDay.push_back(STOCK::Bar::FromKLinePoint(kp));
+		if (Calc30UpStruct(barsDay))
+			dirDay = STOCK::TrendDir::DIR_UP;
+		else if (Calc30DownStruct(barsDay))
+			dirDay = STOCK::TrendDir::DIR_DOWN;
+		else
+			dirDay = STOCK::TrendDir::DIR_SIDE;
+		validDay = true;
+	}
+
+	// 30分钟趋势
+	if (min30Data && min30Data->data.size() >= TREND_30M_LOOKBACK)
+	{
+		bars30.reserve(min30Data->data.size());
+		for (const auto& kp : min30Data->data) bars30.push_back(STOCK::Bar::FromKLinePoint(kp));
+		if (Calc30UpStruct(bars30))
+			dir30 = STOCK::TrendDir::DIR_UP;
+		else if (Calc30DownStruct(bars30))
+			dir30 = STOCK::TrendDir::DIR_DOWN;
+		else
+			dir30 = STOCK::TrendDir::DIR_SIDE;
+		valid30 = true;
+	}
+
+	// 5分钟趋势
+	if (min5Data && min5Data->data.size() >= TREND_5M_LOOKBACK)
+	{
+		bars5.reserve(min5Data->data.size());
+		for (const auto& kp : min5Data->data) bars5.push_back(STOCK::Bar::FromKLinePoint(kp));
+		if (Calc5MinUp(bars5))
+			dir5 = STOCK::TrendDir::DIR_UP;
+		else if (Calc5MinDown(bars5))
+			dir5 = STOCK::TrendDir::DIR_DOWN;
+		else
+			dir5 = STOCK::TrendDir::DIR_SIDE;
+		valid5 = true;
+	}
+	// 分时趋势（前后半场均价对比 + 现价与均价关系）
+	if (timelineData && timelineData->data.size() >= 10)
+	{
+		const auto& pts = timelineData->data;
+		const auto& last = pts.back();
+		double curPrice = last.price;
+		double avgPrice = last.averagePrice;
+		size_t n = pts.size();
+		size_t half = n / 2;
+		double firstHalfAvg = 0, secondHalfAvg = 0;
+		size_t firstCnt = 0, secondCnt = 0;
+		for (size_t i = 0; i < half && i < n; ++i) { firstHalfAvg += pts[i].price; ++firstCnt; }
+		for (size_t i = half; i < n; ++i) { secondHalfAvg += pts[i].price; ++secondCnt; }
+		if (firstCnt > 0) firstHalfAvg /= firstCnt;
+		if (secondCnt > 0) secondHalfAvg /= secondCnt;
+		bool priceUpTrend = (secondHalfAvg > firstHalfAvg) && (curPrice >= avgPrice);
+		bool priceDownTrend = (secondHalfAvg < firstHalfAvg) && (curPrice <= avgPrice);
+		if (priceUpTrend)
+			dirCur = STOCK::TrendDir::DIR_UP;
+		else if (priceDownTrend)
+			dirCur = STOCK::TrendDir::DIR_DOWN;
+		else
+			dirCur = STOCK::TrendDir::DIR_SIDE;
+		validCur = true;
+	}
+
+	// 构建分段文本：形如 "日:上涨(回调) 30:震荡(高抛) 5:下跌(反弹) 分时:上涨"
+	// 后缀规则（由下一级小周期共振判定，分时为最末级无后缀）：
+	//   本级上涨 + 下级下跌 → (回调)；本级下跌 + 下级上涨 → (反弹)；
+	//   本级震荡 + 下级上涨 → (低吸)；本级震荡 + 下级下跌 → (高抛)
+	std::vector<TextSeg> segs;
+	auto appendSeg = [&segs](const CString& prefix, STOCK::TrendDir dir, bool valid,
+		STOCK::TrendDir lowerDir, bool lowerValid)
+		{
+			if (!valid)
+			{
+				segs.push_back({ prefix + _T("--"), COLOR_GRAY_TEXT });
+				return;
+			}
+			CString s = prefix;
+			if (dir == STOCK::TrendDir::DIR_UP)
+			{
+				s += _T("上涨");
+				if (lowerValid && lowerDir == STOCK::TrendDir::DIR_DOWN)
+					s += _T("(回调)");
+				segs.push_back({ s, COLOR_RED_UP });
+			}
+			else if (dir == STOCK::TrendDir::DIR_DOWN)
+			{
+				s += _T("下跌");
+				if (lowerValid && lowerDir == STOCK::TrendDir::DIR_UP)
+					s += _T("(反弹)");
+				segs.push_back({ s, COLOR_GREEN_DOWN });
+			}
+			else
+			{
+				s += _T("震荡");
+				if (lowerValid)
+				{
+					if (lowerDir == STOCK::TrendDir::DIR_UP)
+						s += _T("(低吸)");
+					else if (lowerDir == STOCK::TrendDir::DIR_DOWN)
+						s += _T("(高抛)");
+				}
+				segs.push_back({ s, COLOR_GRAY_TEXT });
+			}
+		};
+
+	// 日K段（后缀由30分钟趋势共振判定）
+	appendSeg(_T("日:"), dirDay, validDay, dir30, valid30);
+	segs.push_back({ _T(" "), COLOR_GRAY_TEXT });
+
+	// 30分钟段（后缀由5分钟趋势共振判定）
+	appendSeg(_T("30:"), dir30, valid30, dir5, valid5);
+	segs.push_back({ _T(" "), COLOR_GRAY_TEXT });
+
+	// 5分钟段（后缀由分时趋势共振判定）
+	appendSeg(_T("5:"), dir5, valid5, dirCur, validCur);
+	segs.push_back({ _T(" "), COLOR_GRAY_TEXT });
+
+	// 分时段（最末级，无后缀）
+	appendSeg(_T("分:"), dirCur, validCur, STOCK::TrendDir::DIR_SIDE, false);
+
+	return segs;
+}
+
 // ========== 智能分析模块：5分钟共振买卖判定 ==========
 // 输入：完整5分钟K线 bars5
 // 输出：SIG_SELL/SIG_BUY/SIG_NONE
@@ -3339,9 +3491,13 @@ CSignalAnalyzer::SignalAnalysisResult CSignalAnalyzer::AnalyzeSignalAt(
 	if (!result.batchHasSell && !result.batchHasBuy)
 		result.batchFilterReason = _T("无买卖条件");
 	else if (result.batchForbidBuy && result.batchHasBuy && !result.batchHasSell)
-	{ result.batchBuyFilteredByForbid = true; result.batchFilterReason = _T("买入被风控拦截(") + result.batchForbidBuyReason + _T(")"); }
+	{
+		result.batchBuyFilteredByForbid = true; result.batchFilterReason = _T("买入被风控拦截(") + result.batchForbidBuyReason + _T(")");
+	}
 	else if (result.batchForbidSell && result.batchHasSell && !result.batchHasBuy)
-	{ result.batchSellFilteredByForbid = true; result.batchFilterReason = _T("卖出被风控拦截(") + result.batchForbidSellReason + _T(")"); }
+	{
+		result.batchSellFilteredByForbid = true; result.batchFilterReason = _T("卖出被风控拦截(") + result.batchForbidSellReason + _T(")");
+	}
 	else
 		result.batchFilterReason = _T("通过");
 
@@ -3651,9 +3807,13 @@ CSignalAnalyzer::SignalAnalysisResult CSignalAnalyzer::AnalyzeSignalAtFromTimeli
 	if (!result.batchHasSell && !result.batchHasBuy)
 		result.batchFilterReason = _T("无买卖条件");
 	else if (result.batchForbidBuy && result.batchHasBuy && !result.batchHasSell)
-	{ result.batchBuyFilteredByForbid = true; result.batchFilterReason = _T("买入被风控拦截(") + result.batchForbidBuyReason + _T(")"); }
+	{
+		result.batchBuyFilteredByForbid = true; result.batchFilterReason = _T("买入被风控拦截(") + result.batchForbidBuyReason + _T(")");
+	}
 	else if (result.batchForbidSell && result.batchHasSell && !result.batchHasBuy)
-	{ result.batchSellFilteredByForbid = true; result.batchFilterReason = _T("卖出被风控拦截(") + result.batchForbidSellReason + _T(")"); }
+	{
+		result.batchSellFilteredByForbid = true; result.batchFilterReason = _T("卖出被风控拦截(") + result.batchForbidSellReason + _T(")");
+	}
 	else
 		result.batchFilterReason = _T("通过");
 
@@ -3866,7 +4026,6 @@ CSignalAnalyzer::RealtimeSignal CSignalAnalyzer::CalcRealtimeSignals(const std::
 
 	return sig;
 }
-
 
 // ========== 多周期MACD趋势判定（日线→30min→5min→1min联动） ==========
 

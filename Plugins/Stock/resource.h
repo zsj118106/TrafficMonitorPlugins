@@ -73,6 +73,8 @@
 #define IDC_SOCKS5_PROXY_EDIT           1054
 #define IDD_RELATED_STOCK_DIALOG        110
 #define IDC_RELATED_STOCK_LIST          1051
+#define IDC_RELATED_RATIO_EDIT          1055
+#define IDC_RELATED_RATIO_BUTTON        1056
 #define IDS_ALERT_LOW_PRICE             115
 #define IDS_ALERT_HIGH_PRICE            116
 #define IDS_PRICE_ALERT_TITLE           117

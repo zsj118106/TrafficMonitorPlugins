@@ -255,7 +255,7 @@ bool CStockDbManager::Init(const std::wstring& config_path)
 		}
 		sqlite3_finalize(stmt);
 		return found;
-	};
+		};
 
 	if (!hasTradeDateColumn())
 	{
@@ -1109,3 +1109,35 @@ std::vector<STOCK::PriceVolumeStat> CStockDbManager::LoadPriceVolumeStats(const 
 	return result;
 }
 
+std::map<std::string, STOCK::TickSummary> CStockDbManager::LoadTickSummary(
+	const std::wstring& stockCode,
+	const std::string& tradeDate)
+{
+	std::map<std::string, STOCK::TickSummary> result;
+	if (m_db == nullptr) return result;
+
+	std::string sql = "SELECT time_key,"
+		"SUM(CASE WHEN buyorsell = 0 THEN vol ELSE 0 END) AS vol_buy,"
+		"SUM(CASE WHEN buyorsell = 1 THEN vol ELSE 0 END) AS vol_sell,"
+		"SUM(CASE buyorsell WHEN 0 THEN vol WHEN 1 THEN - vol ELSE 0 END) AS net_vol "
+		"FROM main.tick_trade WHERE trade_date = ? AND code = ? "
+		"GROUP BY trade_date, code, time_key "
+		"ORDER BY time_key";
+	sqlite3_stmt* stmt = nullptr;
+	if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) return result;
+	sqlite3_bind_text(stmt, 1, tradeDate.c_str(), -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text16(stmt, 2, stockCode.c_str(), -1, SQLITE_TRANSIENT);
+
+	STOCK::TickSummary ret;
+	while (sqlite3_step(stmt) == SQLITE_ROW)
+	{
+		const unsigned char* timeText = sqlite3_column_text(stmt, 0);
+		ret.timeKey = timeText ? reinterpret_cast<const char*>(timeText) : "";
+		ret.buy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 1));
+		ret.sell = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
+		ret.netBuy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 3));
+		result.emplace(ret.timeKey, std::move(ret));
+	}
+	sqlite3_finalize(stmt);
+	return result;
+}

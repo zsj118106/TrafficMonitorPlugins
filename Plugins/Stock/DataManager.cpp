@@ -26,6 +26,43 @@ static std::string GetTodayDateString()
 	return GetLocalDateString(time(nullptr));
 }
 
+// 将关联股票信息序列化为 "code,ratio"（ratio 保留4位小数，小数点统一用 '.'）
+static std::wstring RelatedStockToString(const RelatedStockInfo& info)
+{
+	wchar_t ratio_buf[32];
+	swprintf_s(ratio_buf, L"%.4f", info.ratio);
+	std::wstring ratio_str = ratio_buf;
+	// 某些区域设置下 swprintf 可能使用逗号作为小数点，统一替换为点
+	std::replace(ratio_str.begin(), ratio_str.end(), L',', L'.');
+	return info.code + L"," + ratio_str;
+}
+
+// 解析 "code,ratio"。旧格式只有 code（无占比），此时 ratio 返回 -1
+// 以便调用方按均分处理
+static RelatedStockInfo ParseRelatedStock(const std::wstring& str)
+{
+	RelatedStockInfo info;
+	info.code = str;
+	info.ratio = -1.0;
+	size_t comma = str.find(L',');
+	if (comma != std::wstring::npos)
+	{
+		info.code = str.substr(0, comma);
+		std::wstring ratio_str = str.substr(comma + 1);
+		std::replace(ratio_str.begin(), ratio_str.end(), L',', L'.');   // 兼容逗号小数点
+		try
+		{
+			double ratio = std::stod(ratio_str);
+			if (ratio >= 0.0 && ratio <= 1.0)
+				info.ratio = ratio;
+		}
+		catch (...)
+		{
+		}
+	}
+	return info;
+}
+
 // 前置声明：筹码分布相关静态函数（定义在文件后方，供 Apply* 方法调用）
 static bool IsSameLocalDate(time_t lhs, time_t rhs);
 static bool CalculateEtfChipDistribution(const std::vector<STOCK::ChipKLinePoint>& klines, STOCK::Volume totalShares, STOCK::ChipDistribution& chipData);
@@ -123,10 +160,22 @@ void CDataManager::LoadConfig(const std::wstring& config_dir)
 
 		m_stock_statusbar[code] = ini.GetBool(code.c_str(), L"show_in_statusbar", false);
 
-		std::vector<std::wstring> related_codes;
-		ini.GetStringList(code.c_str(), L"related_stocks", related_codes, std::vector<std::wstring>{});
-		if (!related_codes.empty())
-			m_stock_related[code] = related_codes;
+		std::vector<std::wstring> related_strs;
+		ini.GetStringList(code.c_str(), L"related_stocks", related_strs, std::vector<std::wstring>{});
+		std::vector<RelatedStockInfo> related_info;
+		for (const auto& rs : related_strs)
+			related_info.push_back(ParseRelatedStock(rs));
+		// 旧配置没有占比信息（ParseRelatedStock 得到 -1），按均分处理
+		if (!related_info.empty())
+		{
+			double equal_ratio = 1.0 / related_info.size();
+			for (auto& ri : related_info)
+			{
+				if (ri.ratio < 0.0)
+					ri.ratio = equal_ratio;
+			}
+			m_stock_related[code] = related_info;
+		}
 	}
 
 	m_db_mgr.Init(m_config_path);
@@ -473,10 +522,13 @@ void CDataManager::SaveConfig()
 			ini.WriteBool(item.first.c_str(), L"show_in_statusbar", item.second);
 		}
 
-		// 保存每个股票的关联股票配置
+		// 保存每个股票的关联股票配置（每条为 "code,ratio"）
 		for (const auto& item : m_stock_related)
 		{
-			ini.WriteStringList(item.first.c_str(), L"related_stocks", item.second);
+			std::vector<std::wstring> related_strs;
+			for (const auto& ri : item.second)
+				related_strs.push_back(RelatedStockToString(ri));
+			ini.WriteStringList(item.first.c_str(), L"related_stocks", related_strs);
 		}
 
 		ini.Save();
@@ -992,24 +1044,36 @@ std::vector<std::wstring> CDataManager::GetStatusBarStockCodes()
 	return result;
 }
 
-std::vector<std::wstring> CDataManager::GetRelatedStocks(const std::wstring& code)
+std::vector<RelatedStockInfo> CDataManager::GetRelatedStocks(const std::wstring& code)
 {
 	auto it = m_stock_related.find(code);
 	if (it != m_stock_related.end())
 		return it->second;
-	return std::vector<std::wstring>();
+	return std::vector<RelatedStockInfo>();
 }
 
-void CDataManager::SetRelatedStocks(const std::wstring& code, const std::vector<std::wstring>& related_codes)
+std::vector<std::wstring> CDataManager::GetRelatedStockCodes(const std::wstring& code)
 {
-	if (related_codes.empty())
+	std::vector<std::wstring> codes;
+	auto it = m_stock_related.find(code);
+	if (it != m_stock_related.end())
+	{
+		for (const auto& ri : it->second)
+			codes.push_back(ri.code);
+	}
+	return codes;
+}
+
+void CDataManager::SetRelatedStocks(const std::wstring& code, const std::vector<RelatedStockInfo>& related)
+{
+	if (related.empty())
 	{
 		m_stock_related.erase(code);
 		m_avg_diff_stats.erase(code);
 	}
 	else
 	{
-		m_stock_related[code] = related_codes;
+		m_stock_related[code] = related;
 	}
 }
 
@@ -1110,17 +1174,17 @@ void CDataManager::UpdateRelatedStocksAvgDiff()
 	for (const auto& item : m_stock_related)
 	{
 		const std::wstring& stockId = item.first;
-		const std::vector<std::wstring>& relatedCodes = item.second;
-		const int relatedCount = static_cast<int>(relatedCodes.size());
+		const std::vector<RelatedStockInfo>& relatedInfo = item.second;
+
+		const int relatedCount = static_cast<int>(relatedInfo.size());
 		if (relatedCount < 1) continue;
 
 		double avgDiffPercent = 0.0;
-		int validCount = 0;
 
 		if (relatedCount == 1)
 		{
 			// 只有关联1只股票时，直接用该股票的最低价/最高价/实时价计算涨跌幅
-			auto stockData = GetStockData(relatedCodes[0]);
+			auto stockData = GetStockData(relatedInfo[0].code);
 			if (stockData && stockData->info.is_ok && stockData->info.prevClosePrice != 0)
 			{
 				double prevClose = stockData->info.prevClosePrice;
@@ -1128,7 +1192,6 @@ void CDataManager::UpdateRelatedStocksAvgDiff()
 				double highPct = (stockData->info.highPrice - prevClose) / prevClose * 100;
 				double curPct = stockData->info.GetChangePercent();
 				avgDiffPercent = curPct;
-				validCount = 1;
 
 				// 更新最低/最高/实时均幅（CheckAndResetAvgDiffDaily 保证开盘时清零旧数据）
 				SetAvgDiffStats(stockId, lowPct, highPct, avgDiffPercent);
@@ -1143,22 +1206,13 @@ void CDataManager::UpdateRelatedStocksAvgDiff()
 			// 多只关联股票时，计算平均涨幅
 			for (int i = 0; i < relatedCount; i++)
 			{
-				auto stockData = GetStockData(relatedCodes[i]);
-				if (stockData && stockData->info.is_ok)
+				auto stockData = GetStockData(relatedInfo[i].code);
+				if (stockData && stockData->info.is_ok && stockData->info.prevClosePrice != 0)
 				{
-					double displayPrice = stockData->info.currentPrice > 0 ? stockData->info.currentPrice : stockData->info.prevClosePrice;
-					double diff = displayPrice - stockData->info.prevClosePrice;
-					if (stockData->info.prevClosePrice != 0)
-					{
-						avgDiffPercent += (diff / stockData->info.prevClosePrice) * 100;
-						validCount++;
-					}
+					double curPct = stockData->info.GetChangePercent();
+					avgDiffPercent += curPct * relatedInfo[i].ratio;
 				}
 			}
-			if (validCount > 0)
-				avgDiffPercent /= validCount;
-			else
-				continue;
 
 			UpdateAvgDiffStats(stockId, avgDiffPercent);
 		}

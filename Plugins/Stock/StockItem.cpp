@@ -5,6 +5,7 @@
 #include "Common.h"
 #include <algorithm>
 #include "FloatingWnd.h"
+#include "ChartColors.h"
 #undef min
 #undef max
 
@@ -115,37 +116,57 @@ void StockItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
 	// 绘制价格（左对齐）
 	pDC->SetTextColor(price_color);
 	CString strPrice = data->info.displayPrice.c_str();
+	if (data->info.askLevels[0].price == data->info.currentPrice)
+		strPrice += _T("↑");
+	else
+		strPrice += _T("↓");
+
 	CRect rect_price = rect_value;
-	rect_price.right = rect_price.left + 33;
+	rect_price.right = rect_price.left + 36;
 	pDC->DrawText(strPrice, rect_price, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-
-	// 设置涨跌幅/涨跌额文本颜色
-	if (g_data.m_setting_data.m_color_with_price)
+	if (data->info.iopv > 0)
 	{
-		pDC->SetTextColor(price_color);
+		if (data->info.iopv > data->info.currentPrice)
+			pDC->SetTextColor(COLOR_RED_UP);
+		else
+			pDC->SetTextColor(COLOR_GREEN_DOWN);
+		CString strIopv;
+		strIopv.Format(_T("%g"), data->info.iopv);
+		CRect rect_diff = rect_value;
+		rect_diff.left = rect_value.left + 40; // 价格结束位置
+		rect_diff.right = rect_diff.left + pDC->GetTextExtent(strIopv).cx;
+		pDC->DrawText(strIopv, rect_diff, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 	}
 	else
 	{
-		pDC->SetTextColor(color_default);
-	}
+		// 设置涨跌幅/涨跌额文本颜色
+		if (g_data.m_setting_data.m_color_with_price)
+		{
+			pDC->SetTextColor(price_color);
+		}
+		else
+		{
+			pDC->SetTextColor(color_default);
+		}
 
-	// 绘制涨跌幅百分比（始终显示）
-	CString strDiff;
-	if (fluctuation_percent >= 0)
-		strDiff.Format(_T("+%s"), data->info.displayFluctuation.c_str());
-	else
-		strDiff.Format(_T("-%s"), data->info.displayFluctuation.c_str());
-	CRect rect_diff = rect_value;
-	rect_diff.left = rect_value.left + 36; // 价格结束位置
-	rect_diff.right = rect_diff.left + pDC->GetTextExtent(strDiff).cx;
-	pDC->DrawText(strDiff, rect_diff, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		// 绘制涨跌幅百分比（始终显示）
+		CString strDiff;
+		if (fluctuation_percent >= 0)
+			strDiff.Format(_T("+%s"), data->info.displayFluctuation.c_str());
+		else
+			strDiff.Format(_T("-%s"), data->info.displayFluctuation.c_str());
+		CRect rect_diff = rect_value;
+		rect_diff.left = rect_value.left + 36; // 价格结束位置
+		rect_diff.right = rect_diff.left + pDC->GetTextExtent(strDiff).cx;
+		pDC->DrawText(strDiff, rect_diff, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
-	// 绘制涨跌额（根据配置决定是否显示）
-	if (g_data.m_setting_data.m_show_fluctuation)
-	{
-		CRect rect_fluctuation{ rect_value };
-		rect_fluctuation.left = rect_diff.right; // 紧接在涨跌幅后面
-		pDC->DrawText(data->info.displayFluctuationDiff.c_str(), rect_fluctuation, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		// 绘制涨跌额（根据配置决定是否显示）
+		if (g_data.m_setting_data.m_show_fluctuation)
+		{
+			CRect rect_fluctuation{ rect_value };
+			rect_fluctuation.left = rect_diff.right; // 紧接在涨跌幅后面
+			pDC->DrawText(data->info.displayFluctuationDiff.c_str(), rect_fluctuation, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
 	}
 }
 

@@ -9,7 +9,8 @@
 #include <ctime>
 #include <limits>
 
-void CStatusBarPanel::DrawHeader(CDC& memDC, const STOCK::StockInfo& realtimeData, int windowWidth, int headerHeight, const CString& macdTrendSignal)
+/// 绘制标题栏
+void CStatusBarPanel::DrawMainHeader(CDC& memDC, const STOCK::StockInfo& realtimeData, int windowWidth, int headerHeight)
 {
 	double diff = realtimeData.GetChangeAmount();
 	double diffPercent = realtimeData.GetChangePercent();
@@ -19,17 +20,20 @@ void CStatusBarPanel::DrawHeader(CDC& memDC, const STOCK::StockInfo& realtimeDat
 	CString prefixTxt;
 	prefixTxt.Format(_T("%s:"), realtimeData.displayName.c_str());
 
-	CString currentTxt = realtimeData.IsETF() ? CCommon::FormatETFPrice(realtimeData.currentPrice) : CCommon::FormatFloat(realtimeData.currentPrice);
+	CString currentTxt = realtimeData.IsETF() ?
+		CCommon::FormatETFPrice(realtimeData.currentPrice) :
+		CCommon::FormatFloat(realtimeData.currentPrice);
+
 	CString diffTxt;
 	if (diff >= 0)
-		diffTxt.Format(_T(" +%.2f%%"), diffPercent);
+		diffTxt.Format(_T(" +%.2f%% "), diffPercent);
 	else
-		diffTxt.Format(_T(" %.2f%%"), diffPercent);
+		diffTxt.Format(_T(" %.2f%% "), diffPercent);
 
 	// MACD趋势信号标签
+	auto segs = CSignalAnalyzer::CalcTrendSegments(realtimeData);
 	CString macdTxt;
-	if (!macdTrendSignal.IsEmpty())
-		macdTxt.Format(_T(" [%s]"), macdTrendSignal.GetString());
+	for (const auto& seg : segs) macdTxt += seg.text;
 
 	// 计算总宽度，在整个标题栏水平居中
 	CSize prefixSize = memDC.GetTextExtent(prefixTxt);
@@ -52,29 +56,24 @@ void CStatusBarPanel::DrawHeader(CDC& memDC, const STOCK::StockInfo& realtimeDat
 	memDC.TextOut(curX, centerY - diffSize.cy / 2, diffTxt);
 
 	// 绘制MACD趋势信号
+	int dwrawY = centerY - macdSize.cy / 2;
 	if (!macdTxt.IsEmpty())
 	{
 		curX += diffSize.cx;
-		// 信号颜色：正T=红色，反T=绿色，持有=橙色，观望=灰色
-		COLORREF macdColor;
-		if (macdTrendSignal == _T("正T"))
-			macdColor = RGB(255, 50, 50);
-		else if (macdTrendSignal == _T("反T"))
-			macdColor = RGB(0, 180, 0);
-		else if (macdTrendSignal == _T("持有"))
-			macdColor = RGB(255, 165, 0);
-		else
-			macdColor = RGB(128, 128, 128);
-		memDC.SetTextColor(macdColor);
-		memDC.TextOut(curX, centerY - macdSize.cy / 2, macdTxt);
+		for (const auto& seg : segs)
+		{
+			memDC.SetTextColor(seg.color);
+			memDC.TextOut(curX, dwrawY, seg.text);
+			curX += memDC.GetTextExtent(seg.text).cx;
+		}
 	}
 }
 
-void CStatusBarPanel::DrawRelatedStockBar(CDC& memDC, int w, int topBarY, int singleBarHeight, const std::wstring& stockId, int viewMode)
+void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int singleBarHeight, const std::wstring& stockId, int viewMode)
 {
 	const int GAP = 2;
 
-	std::vector<std::wstring> relatedCodes = g_data.GetRelatedStocks(stockId);
+	std::vector<std::wstring> relatedCodes = g_data.GetRelatedStockCodes(stockId);
 	bool isRelatedMode = !relatedCodes.empty();
 	if (relatedCodes.empty())
 	{
@@ -194,11 +193,9 @@ void CStatusBarPanel::DrawRelatedStockBar(CDC& memDC, int w, int topBarY, int si
 				if (stockData && stockData->info.is_ok)
 				{
 					const auto& info = stockData->info;
-					double displayPrice = info.currentPrice > 0 ? info.currentPrice : info.prevClosePrice;
-					double diff = displayPrice - info.prevClosePrice;
-					double diffPercent = info.prevClosePrice != 0 ? (diff / info.prevClosePrice) * 100 : 0;
+					double diffPercent = info.GetChangePercent();
 					stockTexts[i].nameStr = info.GetStockListName() + _T(":");
-					if (diff >= 0)
+					if (diffPercent >= 0)
 						stockTexts[i].changeStr.Format(_T("+%.2f%%"), diffPercent);
 					else
 						stockTexts[i].changeStr.Format(_T("%.2f%%"), diffPercent);
@@ -261,13 +258,11 @@ void CStatusBarPanel::DrawRelatedStockBar(CDC& memDC, int w, int topBarY, int si
 			if (stockData && stockData->info.is_ok)
 			{
 				const auto& info = stockData->info;
-				double displayPrice = info.currentPrice > 0 ? info.currentPrice : info.prevClosePrice;
-				double diff = displayPrice - info.prevClosePrice;
-				double diffPercent = info.prevClosePrice != 0 ? (diff / info.prevClosePrice) * 100 : 0;
+				double diffPercent = info.GetChangePercent();
 
 				CString nameStr = info.GetStockListName() + _T(":");
 				CString changeStr;
-				if (diff >= 0)
+				if (diffPercent >= 0)
 					changeStr.Format(_T("+%.2f%%"), diffPercent);
 				else
 					changeStr.Format(_T("%.2f%%"), diffPercent);
@@ -299,14 +294,14 @@ void CStatusBarPanel::DrawRelatedStockBar(CDC& memDC, int w, int topBarY, int si
 
 			// 红绿颜色分3档，由浅到深
 			static const COLORREF AVG_RED_COLORS[] = {
-				RGB(255, 13, 0),   // 浅红
-				RGB(255, 0, 25),   // 中红
+				RGB(255, 13, 0),    // 浅红
+				RGB(255, 0, 25),    // 中红
 				RGB(102, 0, 102)    // 深红
 			};
 			static const COLORREF AVG_GREEN_COLORS[] = {
 				RGB(47, 158, 68),   // 浅绿
-				RGB(0, 230, 0),   // 中绿
-				RGB(10, 80, 55)    // 深绿
+				RGB(0, 230, 0),     // 中绿
+				RGB(3, 50, 25)      // 深绿
 			};
 
 			// 红绿颜色深度由均值在区间中的位置决定
@@ -503,4 +498,3 @@ void CStatusBarPanel::DrawSystemStatusBar(CDC& memDC, int w, int bottomBarY, int
 		}
 	}
 }
-

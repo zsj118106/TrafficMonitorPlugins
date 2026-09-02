@@ -42,23 +42,3 @@ struct TimelineDrawContext {
 	STOCK::Price prevMa10{ 0 };
 	STOCK::Price prevMa20{ 0 };
 };
-
-// K线图公共数据结构
-struct KLineDrawData {
-	int x, y, w, h;
-	int startIndex, finalStartIndex;
-	int displayCount, maxVisibleKlines, scrollRange, scrollPos;
-	int barWidth;
-	int gap;
-	STOCK::Price maxPrice, minPrice;
-	double unitY;
-	const std::vector<STOCK::KLinePoint>* klineData;
-	const STOCK::StockInfo* stockInfo;
-};
-
-// K线图月份标签信息
-struct LabelInfo {
-	int year;
-	int month;
-	int barX;
-};
