@@ -292,18 +292,6 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 			int avgAreaH = singleBarHeight;
 			int avgAreaY = topBarY;
 
-			// 红绿颜色分3档，由浅到深
-			static const COLORREF AVG_RED_COLORS[] = {
-				RGB(255, 13, 0),    // 浅红
-				RGB(255, 0, 25),    // 中红
-				RGB(102, 0, 102)    // 深红
-			};
-			static const COLORREF AVG_GREEN_COLORS[] = {
-				RGB(47, 158, 68),   // 浅绿
-				RGB(0, 230, 0),     // 中绿
-				RGB(3, 50, 25)      // 深绿
-			};
-
 			// 红绿颜色深度由均值在区间中的位置决定
 			double range = maxAvgDiff - minAvgDiff;
 			int redIdx, greenIdx;
@@ -325,7 +313,7 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 			COLORREF greenColor = AVG_GREEN_COLORS[greenIdx];
 
 			// 绘制红绿背景
-			if (range == 0 || avgDiffPercent <= minAvgDiff)
+			if (avgDiffPercent <= minAvgDiff)
 			{
 				memDC.FillSolidRect(avgAreaX, avgAreaY, avgAreaWidth, avgAreaH, greenColor);
 			}
@@ -339,16 +327,9 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 				int redWidth = static_cast<int>(ratio * avgAreaWidth);
 				redWidth = max(0, min(redWidth, avgAreaWidth));
 				int greenWidth = avgAreaWidth - redWidth;
-				if (redWidth >= greenWidth)
-				{
-					memDC.FillSolidRect(avgAreaX, avgAreaY, redWidth, avgAreaH, redColor);
-					memDC.FillSolidRect(avgAreaX + redWidth, avgAreaY, greenWidth, avgAreaH, greenColor);
-				}
-				else
-				{
-					memDC.FillSolidRect(avgAreaX, avgAreaY, greenWidth, avgAreaH, greenColor);
-					memDC.FillSolidRect(avgAreaX + greenWidth, avgAreaY, redWidth, avgAreaH, redColor);
-				}
+
+				memDC.FillSolidRect(avgAreaX, avgAreaY, redWidth, avgAreaH, redColor);
+				memDC.FillSolidRect(avgAreaX + redWidth, avgAreaY, greenWidth, avgAreaH, greenColor);
 			}
 
 			// 切换到固定字体绘制均幅区域

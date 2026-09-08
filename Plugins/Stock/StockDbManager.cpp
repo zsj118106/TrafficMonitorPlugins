@@ -1116,7 +1116,7 @@ std::map<std::string, STOCK::TickSummary> CStockDbManager::LoadTickSummary(
 	std::map<std::string, STOCK::TickSummary> result;
 	if (m_db == nullptr) return result;
 
-	std::string sql = "SELECT time_key,"
+	std::string sql = "SELECT trade_date, time_key,"
 		"SUM(CASE WHEN buyorsell = 0 THEN vol ELSE 0 END) AS vol_buy,"
 		"SUM(CASE WHEN buyorsell = 1 THEN vol ELSE 0 END) AS vol_sell,"
 		"SUM(CASE buyorsell WHEN 0 THEN vol WHEN 1 THEN - vol ELSE 0 END) AS net_vol "
@@ -1131,11 +1131,13 @@ std::map<std::string, STOCK::TickSummary> CStockDbManager::LoadTickSummary(
 	STOCK::TickSummary ret;
 	while (sqlite3_step(stmt) == SQLITE_ROW)
 	{
-		const unsigned char* timeText = sqlite3_column_text(stmt, 0);
+		const unsigned char* dateText = sqlite3_column_text(stmt, 0);
+		ret.tradeDate = dateText ? reinterpret_cast<const char*>(dateText) : "";
+		const unsigned char* timeText = sqlite3_column_text(stmt, 1);
 		ret.timeKey = timeText ? reinterpret_cast<const char*>(timeText) : "";
-		ret.buy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 1));
-		ret.sell = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
-		ret.netBuy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 3));
+		ret.buy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 2));
+		ret.sell = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 3));
+		ret.netBuy = static_cast<STOCK::Volume>(sqlite3_column_int64(stmt, 4));
 		result.emplace(ret.timeKey, std::move(ret));
 	}
 	sqlite3_finalize(stmt);

@@ -131,7 +131,7 @@ private:
 	CButton m_btnTickDetail;     // 成交明细按钮（MX）
 	CFont m_chipPeakFont;        // 筹码峰按钮小字体
 	std::wstring m_stock_id;
-	UIViewMode m_viewMode{ UI_VIEW_TIMELINE };  // 当前界面视图模式
+	UIViewMode m_viewMode{ UI_VIEW_MIN5_KLINE };  // 当前界面视图模式
 	int m_timelineScrollOffset{ -1 };  // 分时图水平滚动偏移，-1表示需要自动滚动到末尾
 	int m_timelineVisibleCount{ 30 };  // 分时图可见数据点数
 	int m_timelineLastTotalPoints{ 0 };  // 上次绘制的数据点数，用于判断新数据追加时是否自动跟随

@@ -25,7 +25,7 @@ public:
 	struct HoverState {
 		bool isHoveringVolume{ false };
 		int hoveredBarIndex{ -1 };
-		UIViewMode viewMode{ UI_VIEW_TIMELINE };
+		UIViewMode viewMode{ UI_VIEW_MIN5_KLINE };
 		CString timelineMacdTitleTip;
 		CString timelineKdjTitleTip;
 		CString timelineWrTitleTip;

@@ -72,14 +72,15 @@ namespace STOCK
 	// 每分钟交易明细汇总统计
 	struct TickSummary
 	{
+		std::string tradeDate; // 交易日期 YYYY-MM-DD
 		std::string timeKey;   // 接口返回时间 HH:MM（无秒）
 		Volume buy{ 0 };       // 主动买入成交量（手）
 		Volume sell{ 0 };      // 主动卖出成交量（手）
 		Volume netBuy;		   // 净买入成交量（手）
 
 		TickSummary() = default;
-		TickSummary(std::string tk, Volume b, Volume s, Volume nb)
-			: timeKey(tk), buy(b), sell(s), netBuy(nb) {
+		TickSummary(std::string td, std::string tk, Volume b, Volume s, Volume nb)
+			:tradeDate(td), timeKey(tk), buy(b), sell(s), netBuy(nb) {
 		}
 
 		double BuyRatio() const
@@ -434,6 +435,27 @@ namespace STOCK
 		double GetAveragePrice() const { return volume > 0 ? turnover / volume : 0; }
 
 		bool IsETF() const;
+
+		Volume GetMaxOrderVolume() const
+		{
+			Volume maxVol = 0;
+			for (int i = 0; i < MAX_LEVEL; ++i)
+			{
+				if (askLevels[i].volume >= maxVol) maxVol = askLevels[i].volume;
+				if (bidLevels[i].volume >= maxVol) maxVol = bidLevels[i].volume;
+			}
+			return maxVol;
+		}
+		double GetOrderRowRatio(Volume rowVol) const
+		{
+			Volume maxVol = GetMaxOrderVolume();
+			if (maxVol == 0) return 0.0;
+			return static_cast<double>(rowVol) / maxVol;
+		}
+
+		bool IsHighstPrice(Price price) const { return highPrice > 0 && price == highPrice; }
+		bool IsLowestPrice(Price price) const { return lowPrice > 0 && price == lowPrice; }
+		bool IsCurrentPrice(Price price) const { return currentPrice > 0 && price == currentPrice; }
 	};
 
 	// 集合竞价快照数据点

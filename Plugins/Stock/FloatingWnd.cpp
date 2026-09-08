@@ -258,7 +258,7 @@ LRESULT CFloatingWnd::OnUpdateStatus(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-CFloatingWnd::CFloatingWnd() : m_isDestroying(FALSE), m_viewMode(UI_VIEW_TIMELINE)
+CFloatingWnd::CFloatingWnd() : m_isDestroying(FALSE), m_viewMode(UI_VIEW_MIN5_KLINE)
 {
 }
 
@@ -1277,7 +1277,8 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 				if (point.x >= 0 && point.x < rowInfo.nameColWidth)
 				{
 					// 单击名称列：切换到走势图
-					m_viewMode = UI_VIEW_TIMELINE;
+					m_viewMode = UI_VIEW_MIN5_KLINE;
+					g_data.SetCurrentViewMode(UI_VIEW_MIN5_KLINE);
 					m_showChipPeak = false;
 					SetStockId(rowInfo.code);
 					UpdateModeButtons();
@@ -1514,8 +1515,8 @@ void CFloatingWnd::OnRButtonDown(UINT nFlags, CPoint point)
 	}
 	else
 	{
-		g_data.SetCurrentViewMode(UI_VIEW_TIMELINE);
-		m_viewMode = UI_VIEW_TIMELINE;
+		g_data.SetCurrentViewMode(UI_VIEW_MIN5_KLINE);
+		m_viewMode = UI_VIEW_MIN5_KLINE;
 		m_showChipPeak = false;
 		m_showJZCurve = CCommon::IsFundCode(m_stock_id);  // 基金默认显示净值曲线
 		UpdateModeButtons();
@@ -2609,6 +2610,11 @@ void CFloatingWnd::OnBnClickedBollBtn()
 void CFloatingWnd::OnBnClickedZoomOutBtn()
 {
 	// 缩小：先放大到最大（与"+"按钮一致），然后移动到今天最开的位置（左边第一根线为9:30）
+	if (m_viewMode == UI_VIEW_TIMELINE)
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
+		m_timelineScrollOffset = 0;  // 分时模式从9:30开始
+	}
 	if (m_viewMode == UI_VIEW_DAY_KLINE)
 	{
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;
@@ -2619,7 +2625,7 @@ void CFloatingWnd::OnBnClickedZoomOutBtn()
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_30MIN;
 		m_timelineScrollOffset = 0;
 	}
-	else if (m_viewMode == UI_VIEW_MIN5_KLINE)
+	else
 	{
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;
 		// 5分钟K线模式：找到当天第一根K线的索引作为scrollOffset
@@ -2645,18 +2651,17 @@ void CFloatingWnd::OnBnClickedZoomOutBtn()
 			}
 		}
 	}
-	else
-	{
-		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
-		m_timelineScrollOffset = 0;  // 分时模式从9:30开始
-	}
 	Invalidate();
 }
 
 void CFloatingWnd::OnBnClickedZoomInBtn()
 {
 	// 放大：显示最新40个数据点
-	if (m_viewMode == UI_VIEW_DAY_KLINE)
+	if (m_viewMode == UI_VIEW_TIMELINE)
+	{
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
+	}
+	else if (m_viewMode == UI_VIEW_DAY_KLINE)
 	{
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1DAY;
 	}
@@ -2664,13 +2669,9 @@ void CFloatingWnd::OnBnClickedZoomInBtn()
 	{
 		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_30MIN;
 	}
-	else if (m_viewMode == UI_VIEW_MIN5_KLINE)
-	{
-		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;
-	}
 	else
 	{
-		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_1MIN;
+		m_timelineVisibleCount = TIME_LINE_VISIBLE_COUNT_5MIN;
 	}
 	m_timelineScrollOffset = -1;  // 自动滚动到末尾
 	Invalidate();
@@ -2729,6 +2730,8 @@ LRESULT CFloatingWnd::OnCloseWindow(WPARAM wParam, LPARAM lParam)
 		SetForegroundWindow();
 		DestroyWindow();
 	}
+
+	g_data.SetCurrentViewMode(UI_VIEW_MIN5_KLINE);
 	return 0;
 }
 
@@ -2797,6 +2800,8 @@ void CFloatingWnd::OnDestroy()
 	{
 		m_CTransparentWnd.DestroyWindow();
 	}
+
+	g_data.SetCurrentViewMode(UI_VIEW_MIN5_KLINE);
 }
 
 void CFloatingWnd::OnTimer(UINT_PTR nIDEvent)

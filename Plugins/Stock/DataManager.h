@@ -201,5 +201,5 @@ private:
 	std::string m_avg_diff_last_date;
 	bool m_avg_diff_reset_pending{ false };  // 跨天待重置标识，等交易时段获取到今日数据后才执行
 
-	UIViewMode m_cur_view_mode{ UI_VIEW_TIMELINE }; // 当前界面模式
+	UIViewMode m_cur_view_mode{ UI_VIEW_MIN5_KLINE }; // 当前界面模式
 };

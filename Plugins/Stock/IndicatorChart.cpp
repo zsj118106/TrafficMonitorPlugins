@@ -8,7 +8,9 @@
 
 // ========== DrawMACDChart（分时数据版本） ==========
 
-void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int height, const std::vector<STOCK::TimelinePoint>& timelinePoint, const std::vector<MACDData>& macdData, int startIndex /* = 0 */, int visibleCount /* = -1 */, int xAxisPoints /* = 0 */)
+void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int height,
+	const std::vector<STOCK::TimelinePoint>& timelinePoint,
+	const std::vector<MACDData>& macdData, int startIndex /* = 0 */, int visibleCount /* = -1 */, int xAxisPoints /* = 0 */)
 {
 	if (timelinePoint.empty() || macdData.empty())
 		return;
@@ -41,7 +43,7 @@ void CIndicatorChart::DrawMACDChart(CDC& memDC, int x, int y, int width, int hei
 	const int xSlots = (xAxisPoints > 0) ? xAxisPoints : totalPts;
 	const int fixedGap = 1;
 	int slotWidth = xSlots > 0 ? width / xSlots : 1;
-	int barWidth = max(2, static_cast<int>((slotWidth - fixedGap) * 0.8));
+	int barWidth = max(2, static_cast<int>((slotWidth - fixedGap)));
 	int halfSlot = slotWidth / 2;
 
 	// 绘制 MACD 柱状图
@@ -1499,11 +1501,11 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 	STOCK::Volume percentile_9 = sortVolumes[sortVolumes.size() * 0.7]; //取70%位置的成交量作为开方缩放的分界点
 
 	// 获取分时成交量汇总数据
-	bool bTimeLinerMode = (g_data.GetCurrentViewMode() == UI_VIEW_TIMELINE);
+	auto curMode = g_data.GetCurrentViewMode();
 	std::map<std::string, ::TickSummary>vecTickSummary;
-	if (bTimeLinerMode && stockInfo != nullptr)
+	if (stockInfo != nullptr)
 	{
-		auto strDate = CCommon::GetTodayDate();
+		auto strDate = CCommon::get_stock_trade_date();
 		vecTickSummary = g_data.GetDbManager().LoadTickSummary(stockInfo->code, strDate);
 	}
 
@@ -1535,37 +1537,84 @@ void CIndicatorChart::DrawVolumeChart(CDC& memDC, int x, int y, int width, int h
 
 		// TODO : 这里的涨跌颜色判断逻辑可能需要根据实际需求调整，
 		// 分时模式下柱子的颜色分成两部分，从vecTickSummary取当前时间下主动买入和主动卖出的成交量，主动买入为红色，主动卖出为绿色，
-		// 可以直接将高度按比例分配给红色和绿色两部分，比例大的绘制在下方，比例小的绘制在上方，形成一个红绿分层的柱子。
+		// 可以直接将高度按比例分配给红色和绿色两部分，比例大的绘制在上方，比例小的绘制在下方，形成一个红绿分层的柱子。
 		// K线模式下使用开盘价和收盘价判断涨跌
-		if (bTimeLinerMode && !vecTickSummary.empty())
+		bool bDrawDefault = true;
+		if (!vecTickSummary.empty())
 		{
-			std::string strTime = item.time.substr(0, 5);
-
-			auto& curTick = vecTickSummary[strTime];
-			int buyHeght = barHeight * curTick.BuyRatio();
-			int sellHeght = barHeight * curTick.SellRatio();
-
-			if (curTick.netBuy >= 0)
+			int buyHeght, sellHeght, netBuy;
+			if (curMode == UI_VIEW_TIMELINE)
 			{
-				CRect buyRect(barX, barY, barX + barWidth, y + height - sellHeght);
-				CBrush brush(COLOR_RED_UP);
-				memDC.FillRect(buyRect, &brush);
-				CRect sellRect(barX, barY + buyHeght, barX + barWidth, y + height);
-				CBrush brush1(COLOR_GREEN_DOWN);
-				memDC.FillRect(sellRect, &brush1);
+				std::string strTime = item.time.substr(0, 5);
+				std::string preTime = CCommon::subtractOneMinuteFast(strTime);
+				if (vecTickSummary.find(preTime) != vecTickSummary.end())
+				{
+					auto& curTick = vecTickSummary[preTime];
+					buyHeght = barHeight * curTick.BuyRatio();
+					sellHeght = barHeight * curTick.SellRatio();
+					netBuy = curTick.netBuy;
+					bDrawDefault = false;
+				}
 			}
-			else
+			else if (curMode == UI_VIEW_MIN5_KLINE || curMode == UI_VIEW_MIN30_KLINE)
 			{
-				CRect sellRect(barX, barY, barX + barWidth, y + height - buyHeght);
-				CBrush brush(COLOR_GREEN_DOWN);
-				memDC.FillRect(sellRect, &brush);
+				if (item.fullTime.find(vecTickSummary.begin()->second.tradeDate) == 0)
+				{
+					int interval = (curMode == UI_VIEW_MIN5_KLINE) ? 5 : 30;
+					std::string strTime = item.time.substr(0, 5);
+					STOCK::TickSummary sumTick;
+					auto itFind = vecTickSummary.find(strTime);
+					if (itFind != vecTickSummary.end())
+					{
+						sumTick = {};
+						auto it = itFind;
+						// 关键：向前跳一步，跳过K线结束时刻本身(09:35)
+						if (it != vecTickSummary.begin())
+						{
+							--it;
+							for (int i = 0; i < interval; ++i)
+							{
+								sumTick.buy += it->second.buy;
+								sumTick.sell += it->second.sell;
+								if (it == vecTickSummary.begin())
+									break;
+								--it;
+							}
+						}
+						netBuy = sumTick.buy - sumTick.sell;
+					}
 
-				CRect buyRect(barX, barY + sellHeght, barX + barWidth, y + height);
-				CBrush brush1(COLOR_RED_UP);
-				memDC.FillRect(buyRect, &brush1);
+					buyHeght = barHeight * sumTick.BuyRatio();
+					sellHeght = barHeight * sumTick.SellRatio();
+					bDrawDefault = false;
+				}
+			}
+
+			if (!bDrawDefault)
+			{
+				if (netBuy >= 0)
+				{
+					CRect buyRect(barX, barY, barX + barWidth, y + height - sellHeght);
+					CBrush brush(COLOR_RED_UP);
+					memDC.FillRect(buyRect, &brush);
+					CRect sellRect(barX, barY + buyHeght, barX + barWidth, y + height);
+					CBrush brush1(COLOR_GREEN_DOWN);
+					memDC.FillRect(sellRect, &brush1);
+				}
+				else
+				{
+					CRect sellRect(barX, barY, barX + barWidth, y + height - buyHeght);
+					CBrush brush(COLOR_GREEN_DOWN);
+					memDC.FillRect(sellRect, &brush);
+
+					CRect buyRect(barX, barY + sellHeght, barX + barWidth, y + height);
+					CBrush brush1(COLOR_RED_UP);
+					memDC.FillRect(buyRect, &brush1);
+				}
 			}
 		}
-		else
+
+		if (bDrawDefault)
 		{
 			COLORREF color = COLOR_GREEN_DOWN;
 			// K线模式下openPrice>0，使用收盘价vs开盘价判断涨跌，与K线柱颜色一致

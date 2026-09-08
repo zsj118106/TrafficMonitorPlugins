@@ -6,6 +6,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <algorithm>
 #include "DataManager.h"
 
 namespace
@@ -689,33 +690,54 @@ RegResult CSignalAnalyzer::CalcLinearRegFromDeque(const std::deque<double>& win)
 	result.slope = 0.0;
 	result.r2 = 0.0;
 
-	int n = static_cast<int>(win.size());
+	const size_t n = win.size();
 	if (n < 6)
 		return result;
 
-	double Sx = 0, Sy = 0, Sxx = 0, Syy = 0, Sxy = 0;
-	for (int i = 0; i < n; i++)
+	const double kEps = 1e-12;
+	const double dn = static_cast<double>(n);
+	// x中心化，不改变斜率与R2，提升数值稳定性
+	const double xMean = (dn - 1.0) / 2.0;
+
+	double Sy = 0.0;
+	double Sxx = 0.0;
+	double Syy = 0.0;
+	double Sxy = 0.0;
+
+	size_t idx = 0;
+	for (double y : win)
 	{
-		double x = static_cast<double>(i);
-		double y = win[i];
-		Sx += x; Sy += y;
-		Sxx += x * x; Syy += y * y;
+		const double x = static_cast<double>(idx) - xMean;
+		Sy += y;
+		Sxx += x * x;
+		Syy += y * y;
 		Sxy += x * y;
+		++idx;
 	}
 
-	double dn = static_cast<double>(n);
-	double denom = dn * Sxx - Sx * Sx;
-	if (denom == 0.0)
+	const double denom = dn * Sxx;
+	if (std::fabs(denom) < kEps)
 		return result;
 
-	double numer = dn * Sxy - Sx * Sy;
+	const double numer = dn * Sxy;
 	result.slope = numer / denom;
 
-	double SStotal = dn * Syy - Sy * Sy;
-	if (SStotal == 0.0)
+	const double SStotal = dn * Syy - Sy * Sy;
+	if (std::fabs(SStotal) < kEps)
+	{
 		result.r2 = 1.0;
+	}
 	else
-		result.r2 = 1.0 - (SStotal - numer * numer / denom) / SStotal;
+	{
+		const double ssResid = SStotal - (numer * numer) / denom;
+		result.r2 = 1.0 - ssResid / SStotal;
+
+		// C++11 没有 std::clamp，手动限制R²范围 [0,1]
+		if (result.r2 < 0.0)
+			result.r2 = 0.0;
+		else if (result.r2 > 1.0)
+			result.r2 = 1.0;
+	}
 
 	result.valid = true;
 	return result;

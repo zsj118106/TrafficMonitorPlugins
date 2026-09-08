@@ -29,20 +29,21 @@ private:
 	// 盘口行数据
 	struct OrderBookRow
 	{
-		STOCK::Price price;
-		STOCK::Price IOPV;  // 净值
-		CString text;
-		CString smallSuffix;
-		CString rightAlignSuffix;  // 右对齐的瞬时变化量（+N/-N）
-		COLORREF rightAlignSuffixColor{ RGB(0,0,0) };  // 右对齐后缀颜色
-		CString cumVolSuffix;      // 累计成交量后缀（显示在瞬时变化量前面）
-		COLORREF cumVolSuffixColor{ RGB(0,0,0) };  // 累计成交量后缀颜色
-		COLORREF textColor;
+		STOCK::Price IOPV{ 0.0 };  // 净值
+		CString strPrice;	//价格
+		CString strVolume;	//挂单量
+		COLORREF volumeColor{ RGB(0,0,0) };  // 挂单量颜色
+		CString diffVol;  // 右对齐的瞬时变化量（+N/-N）
+		COLORREF diffVolColor{ RGB(0,0,0) };  // 右对齐后缀颜色
+		CString sumVol;      // 累计成交量后缀（显示在瞬时变化量前面）
+		COLORREF sumVolColor{ RGB(0,0,0) };  // 累计成交量后缀颜色
+		COLORREF priceColor;
 		bool fillBackground{ false };
 		COLORREF backgroundColor;
-		bool drawSmallSuffix{ false };
 		bool darkBackground{ false };  // 深色背景时文字改白色
 		bool bold{ false };   // 粗体
+		double orderRatio{ 0.0 };  // 卖一/买一后方挂单量占比（0~1），用于绘制背景色
+		double sumVolRatio{ 0.0 };  // 累计买入与累计卖出成交量占比（0~1），用于绘制背景色
 	};
 
 	// 布局上下文（由Draw计算，传递给各子函数）
@@ -72,21 +73,6 @@ private:
 			return (i < rem) ? (rowHeight + 1) : rowHeight;
 		}
 	};
-
-	// 绘制委比（行0）
-	void DrawWeiBi(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
-
-	// 绘制趋势判定（行1）
-	void DrawTrend(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo, UIViewMode viewMode);
-
-	// 绘制卖盘行（最高+卖三~卖一，行2-5）
-	void DrawAskRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
-
-	// 绘制净比00柱状图（行6）
-	void DrawNetRatio00(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
-
-	// 绘制买盘行（买一~买三+最低，行7-10）
-	void DrawBidRows(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
 
 	// 绘制净比99（行15）
 	void DrawNetRatio99(CDC& memDC, const LayoutContext& lc, const STOCK::StockInfo& stockInfo);
@@ -130,8 +116,8 @@ private:
 	STOCK::Volume GetOrderDeltaLots(STOCK::Price price, bool isAskSide) const;
 
 	// 辅助：获取盘口累计成交量（手）
-	// isAskSide=true(卖盘)返回该价格的主动买累计量，isAskSide=false(买盘)返回主动卖累计量
-	STOCK::Volume GetOrderBookCumVol(STOCK::Price price, bool isAskSide) const;
+	// 返回该价格的主动买,主动卖累计量
+	std::pair<STOCK::Volume, STOCK::Volume> GetOrderBookCumVol(STOCK::Price price) const;
 
 	// 辅助：每隔5秒从数据库 tick_trade 聚合刷新各价格档位的真实累计成交量
 	// ETF 的成交价格在DB中被Python放大了10倍，此处除以10还原，使key与真实盘口价格一致

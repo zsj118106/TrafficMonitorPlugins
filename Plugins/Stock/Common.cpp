@@ -4,6 +4,24 @@
 #include <sstream>
 #include "DataManager.h"
 #include "NetFetch.h"
+#include <iostream>
+#include <string>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+
+// 红绿颜色分3档，由浅到深
+static const COLORREF AVG_RED_COLORS[] = {
+	RGB(255, 13, 0),    // 浅红
+	RGB(255, 0, 25),    // 中红
+	RGB(102, 0, 102)    // 深红
+};
+static const COLORREF AVG_GREEN_COLORS[] = {
+	RGB(47, 158, 68),   // 浅绿
+	RGB(0, 230, 0),     // 中绿
+	RGB(3, 50, 25)      // 深绿
+};
 
 std::wstring CCommon::StrToUnicode(const char* str, bool utf8)
 {
@@ -412,4 +430,92 @@ std::string CCommon::GetTodayDate()
 	char buf[16];
 	sprintf_s(buf, "%04d-%02d-%02d", localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday);
 	return buf;
+}
+
+std::string CCommon::subtractOneMinuteFast(const std::string& s)
+{
+	auto colon = s.find(':');
+	int h = stoi(s.substr(0, colon));
+	int m = stoi(s.substr(colon + 1));
+	int t = h * 60 + m - 1;
+	if (t < 0) t = 1439;
+	int nh = t / 60;
+	int nm = t % 60;
+
+	std::string res;
+	if (nh < 10) res += '0';
+	res += std::to_string(nh);
+	res += ":";
+	if (nm < 10) res += '0';
+	res += std::to_string(nm);
+	return res;
+}
+
+static tm get_local_tm(std::time_t t)
+{
+	tm res{};
+#if _WIN32
+	localtime_s(&res, &t);
+#else
+	localtime_r(&t, &res);
+#endif
+	return res;
+}
+
+static std::string fmt_date(const tm& t)
+{
+	std::ostringstream oss;
+	oss << std::setfill('0')
+		<< std::setw(4) << (t.tm_year + 1900) << "-"
+		<< std::setw(2) << (t.tm_mon + 1) << "-"
+		<< std::setw(2) << t.tm_mday;
+	return oss.str();
+}
+
+static std::time_t minus_days(std::time_t now, int days)
+{
+	return now - static_cast<std::time_t>(days) * 86400;
+}
+
+// 获取上一个工作日，跳过周六(6)、周日(0)
+static tm prev_business_day(std::time_t base)
+{
+	for (int i = 1; i <= 7; ++i)
+	{
+		auto tt = minus_days(base, i);
+		auto t = get_local_tm(tt);
+		if (t.tm_wday != 0 && t.tm_wday != 6)
+		{
+			return t;
+		}
+	}
+	return get_local_tm(base);
+}
+
+/**
+ * @brief 获取股票交易日 YYYY‑MM‑DD
+ * 规则：
+ * 1. 当前是周六/周日，返回最近上一个交易日
+ * 2. 工作日：时间 >=09:30 返回今日；否则返回前一个交易日
+ * 换算总分钟比较，只一次判断
+ */
+std::string CCommon::get_stock_trade_date()
+{
+	auto now_tp = std::chrono::system_clock::now();
+	std::time_t now = std::chrono::system_clock::to_time_t(now_tp);
+	auto today = get_local_tm(now);
+
+	// 周末，直接返回上一个交易日
+	if (today.tm_wday == 0 || today.tm_wday == 6)
+		return fmt_date(prev_business_day(now));
+
+	// 全部转为0点起总分钟数，单次比较 570 = 09:30
+	const int OPEN_MIN = 9 * 60 + 30;
+	int totalMin = today.tm_hour * 60 + today.tm_min;
+	bool after_open = (totalMin >= OPEN_MIN);
+
+	if (after_open)
+		return fmt_date(today);
+	else
+		return fmt_date(prev_business_day(now));
 }

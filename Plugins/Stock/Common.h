@@ -17,6 +17,9 @@ enum UIViewMode
 	UI_VIEW_DAY_KLINE,		// 日K线界面
 };
 
+extern const COLORREF AVG_RED_COLORS[];
+extern const COLORREF AVG_GREEN_COLORS[];
+
 using namespace::std;
 // Log0("这是调试信息！\n")
 #define Log0(fmt) {TCHAR sOut[256];_stprintf_s(sOut,_T(fmt));OutputDebugString(sOut);}
@@ -131,7 +134,12 @@ public:
 	static int GetTradingMinute(time_t t);
 	static int GetTradingMinute(int hour, int minute);
 
+	// 获取今天的日期字符串，格式为"YYYY-MM-DD"
 	static std::string GetTodayDate();
+	// 输入“HH:MM”时间字符串，返回减去1分钟后的时间字符串，格式为"HH:MM"
+	static std::string subtractOneMinuteFast(const std::string& s);
+
+	static std::string get_stock_trade_date();
 };
 
 //通过构造函数传递一个bool变量的引用，在构造时将其置为true，析构时置为false

@@ -11,7 +11,7 @@ class CTimelineChart
 public:
 	// 走势图悬停/交互状态
 	struct HoverState {
-		UIViewMode viewMode{ UI_VIEW_TIMELINE };
+		UIViewMode viewMode{ UI_VIEW_MIN5_KLINE };
 		bool isHoveringVolume{ false };
 		int hoveredBarIndex{ -1 };
 		STOCK::TimelinePoint hoveredData;
