@@ -100,20 +100,9 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 	}
 	if (showAvgDiff)
 	{
-		if (minAvgDiff >= 0)
-			minAvgValueStr.Format(_T("+%.2f"), minAvgDiff);
-		else
-			minAvgValueStr.Format(_T("%.2f"), minAvgDiff);
-
-		if (avgDiffPercent >= 0)
-			avgValueStr.Format(_T("+%.2f"), avgDiffPercent);
-		else
-			avgValueStr.Format(_T("%.2f"), avgDiffPercent);
-
-		if (maxAvgDiff >= 0)
-			maxAvgValueStr.Format(_T("+%.2f"), maxAvgDiff);
-		else
-			maxAvgValueStr.Format(_T("%.2f"), maxAvgDiff);
+		minAvgValueStr = CCommon::prefixFormat(minAvgDiff);
+		avgValueStr = CCommon::prefixFormat(avgDiffPercent);
+		maxAvgValueStr = CCommon::prefixFormat(maxAvgDiff);
 
 		// 计算趋势箭头：分时界面用1分钟趋势，5分钟界面用5分钟趋势
 		RegResult trend = (viewMode < UI_VIEW_MIN5_KLINE)
@@ -125,11 +114,8 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 			if (trend.r2 >= 0.1 || std::abs(trend.slope) >= 0.001)
 			{
 				// 箭头强度：低1个、中2个、高3个
-				int arrowCount = 1;
-				if (trend.r2 >= 0.7)
-					arrowCount = 3;
-				else if (trend.r2 >= 0.55)
-					arrowCount = 2;
+				int arrowCount = trend.getArrawCount();
+
 				if (trend.slope > 0)
 					trendArrowStr = CString(_T('↑'), arrowCount);
 				else
@@ -195,10 +181,7 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 					const auto& info = stockData->info;
 					double diffPercent = info.GetChangePercent();
 					stockTexts[i].nameStr = info.GetStockListName() + _T(":");
-					if (diffPercent >= 0)
-						stockTexts[i].changeStr.Format(_T("+%.2f%%"), diffPercent);
-					else
-						stockTexts[i].changeStr.Format(_T("%.2f%%"), diffPercent);
+					stockTexts[i].changeStr = CCommon::prefixFormat(diffPercent);
 					stockTexts[i].valid = true;
 				}
 				else
@@ -259,21 +242,27 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 			{
 				const auto& info = stockData->info;
 				double diffPercent = info.GetChangePercent();
-
 				CString nameStr = info.GetStockListName() + _T(":");
-				CString changeStr;
-				if (diffPercent >= 0)
-					changeStr.Format(_T("+%.2f%%"), diffPercent);
-				else
-					changeStr.Format(_T("%.2f%%"), diffPercent);
 
 				memDC.SetTextColor(COLOR_BLACK);
 				memDC.TextOut(textX, topBarY + g_data.RDPI(2), nameStr);
 				textX += memDC.GetTextExtent(nameStr).cx + GAP;
 
 				memDC.SetTextColor(CCommon::GetProfitLossColor(diffPercent));
+				CString changeStr = CCommon::prefixFormat(diffPercent);
 				memDC.TextOut(textX, topBarY + g_data.RDPI(2), changeStr);
 				textX += memDC.GetTextExtent(changeStr).cx + GAP;
+
+				// 绘制分时趋势箭头（仅在关联模式下显示，位于每只股票后面）
+				/*auto trend = stockData->CalTimeLineTrend();
+				if (trend.valid && trend.slope != 0.0)
+				{
+					bool isUp = trend.slope > 0;
+					memDC.SetTextColor(isUp ? COLOR_RED_UP : COLOR_GREEN_DOWN);
+					CString strTrend = isUp ? _T("\u2191") : _T("\u2193");
+					memDC.TextOut(textX, topBarY + g_data.RDPI(2), strTrend);
+					textX += memDC.GetTextExtent(strTrend).cx + GAP;
+				}*/
 			}
 			else
 			{
@@ -382,18 +371,12 @@ void CStatusBarPanel::DrawRelatedStatusBar(CDC& memDC, int w, int topBarY, int s
 			if (stockData && stockData->info.is_ok)
 			{
 				const auto& info = stockData->info;
-				double displayPrice = info.currentPrice > 0 ? info.currentPrice : info.prevClosePrice;
-				double diff = displayPrice - info.prevClosePrice;
-				double diffPercent = info.prevClosePrice != 0 ? (diff / info.prevClosePrice) * 100 : 0;
+				double diffPercent = info.GetPriceChange();
 
 				CString nameStr = info.GetStockListName();
 				CString priceStr;
-				priceStr.Format(_T("%.2f"), displayPrice);
-				CString changeStr;
-				if (diff >= 0)
-					changeStr.Format(_T("+%.2f%%"), diffPercent);
-				else
-					changeStr.Format(_T("%.2f%%"), diffPercent);
+				priceStr.Format(_T("%.2f"), info.currentPrice);
+				CString changeStr = CCommon::prefixFormat(diffPercent, _T("%"));
 
 				memDC.SetTextColor(COLOR_BLACK);
 				memDC.TextOut(textX, topBarY + g_data.RDPI(2), nameStr);
@@ -447,18 +430,11 @@ void CStatusBarPanel::DrawSystemStatusBar(CDC& memDC, int w, int bottomBarY, int
 		if (stockData && stockData->info.is_ok)
 		{
 			const auto& info = stockData->info;
-			double displayPrice = info.currentPrice > 0 ? info.currentPrice : info.prevClosePrice;
-			double diff = displayPrice - info.prevClosePrice;
-			double diffPercent = info.prevClosePrice != 0 ? (diff / info.prevClosePrice) * 100 : 0;
-
+			double diffPercent = info.GetPriceChange();
 			CString nameStr = info.GetStockListName();
 			CString priceStr;
-			priceStr.Format(_T("%.2f"), displayPrice);
-			CString changeStr;
-			if (diff >= 0)
-				changeStr.Format(_T("+%.2f%%"), diffPercent);
-			else
-				changeStr.Format(_T("%.2f%%"), diffPercent);
+			priceStr.Format(_T("%.2f"), info.currentPrice);
+			CString changeStr = CCommon::prefixFormat(diffPercent, _T("%"));
 
 			memDC.SetTextColor(COLOR_BLACK);
 			memDC.TextOut(textX, bottomBarY + g_data.RDPI(2), nameStr);

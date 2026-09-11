@@ -285,6 +285,7 @@
     <ClInclude Include="sqlite3.h" />
     <ClInclude Include="StockDbManager.h" />
     <ClInclude Include="Stock.h" />
+    <ClInclude Include="MarketOrderBook.h" />
     <ClInclude Include="StockDef.h" />
     <ClInclude Include="StockItem.h" />
     <ClInclude Include="StockListPanel.h" />
@@ -327,6 +328,7 @@
     </ClCompile>
     <ClCompile Include="StockDbManager.cpp" />
     <ClCompile Include="Stock.cpp" />
+    <ClCompile Include="MarketOrderBook.cpp" />
     <ClCompile Include="StockDef.cpp" />
     <ClCompile Include="StockItem.cpp" />
     <ClCompile Include="StockListPanel.cpp" />

@@ -8,6 +8,8 @@
 #include <iostream>
 #include <limits>
 #include <ctime>
+#include <algorithm>
+#include "MarketOrderBook.h"
 
 // 线性回归结果（基础数据结构，供CSignalAnalyzer/CDataManager等使用）
 struct RegResult
@@ -15,6 +17,22 @@ struct RegResult
 	bool valid;    // true=数据足够，结果可信
 	double slope;  // 回归斜率k
 	double r2;     // 拟合优度R²
+
+	int getArrawCount() const
+	{
+		if (!valid)
+			return 0;
+		if (r2 >= 0.7)
+		{
+			if (r2 >= 0.7)
+				return 3; // 高强度箭头
+			else if (r2 >= 0.55)
+				return 2; // 中强度箭头
+			else
+				return 1; // 弱强度箭头
+		}
+		return 0; // 无明显趋势
+	}
 };
 
 namespace STOCK
@@ -456,6 +474,8 @@ namespace STOCK
 		bool IsHighstPrice(Price price) const { return highPrice > 0 && price == highPrice; }
 		bool IsLowestPrice(Price price) const { return lowPrice > 0 && price == lowPrice; }
 		bool IsCurrentPrice(Price price) const { return currentPrice > 0 && price == currentPrice; }
+
+		double GetPriceChange() const;
 	};
 
 	// 集合竞价快照数据点
@@ -616,6 +636,9 @@ namespace STOCK
 		ChipDistribution chipDistribution;
 		CallAuctionData callAuctionData;  // 集合竞价数据
 
+		// 盘口数据模型（数据与视图分离：行情推送时Update，渲染层只读）
+		MarketOrderBook orderBook;
+
 		// 买一到买五、卖一到卖五按价格跟踪挂单瞬时变化量（股）
 		std::map<Price, OrderPriceAccum> orderPriceAccumMap;
 
@@ -640,6 +663,8 @@ namespace STOCK
 			historicalData[period] = _data;
 			return _data;
 		}
+
+		RegResult CalTimeLineTrend();
 
 		void clearTimelinePoint()
 		{

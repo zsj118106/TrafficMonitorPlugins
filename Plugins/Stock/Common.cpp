@@ -318,6 +318,25 @@ CString CCommon::FormatSignedValue(double value, const CString& format)
 	return str;
 }
 
+CString CCommon::prefixFormat(double value, const CString& suffix)
+{
+	CString str;
+	if (value >= 0)
+	{
+		str.Format(_T("+%.2f"), value);
+	}
+	else
+	{
+		str.Format(_T("%.2f"), value);
+	}
+	if (!suffix.IsEmpty())
+	{
+		str += suffix;
+	}
+
+	return str;
+}
+
 bool CCommon::IsAGStockCode(const std::wstring& code)
 {
 	return code.find(L"sh") == 0 || code.find(L"sz") == 0 || code.find(L"bj") == 0;

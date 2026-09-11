@@ -105,6 +105,7 @@ private:
 	CCallAuctionChart m_callAuctionChart;
 	CChipPeakPanel m_chipPeakPanel;
 	COrderBookPanel m_orderBookPanel;
+	MarketOrderBook m_orderBook;   // 盘口数据模型（数据与视图分离，渲染层只读）
 	COverviewPanel m_overviewPanel;
 	CIndicatorChart m_indicatorChart;
 	CStatusBarPanel m_statusBarPanel;

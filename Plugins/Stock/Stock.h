@@ -25,7 +25,7 @@ extern const std::vector<std::wstring> IndexPriority;
 // 获取股票优先级：<200为指数（值越小优先级越高），>=200为个股
 int GetStockPriority(const std::wstring& code);
 
-#define Stock_ITEM_MAX 20
+#define Stock_ITEM_MAX 30 //当前系统最多支持30个股票显示项目
 
 class Stock : public ITMPlugin
 {

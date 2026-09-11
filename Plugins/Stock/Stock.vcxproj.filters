@@ -84,6 +84,9 @@
     <ClInclude Include="StockIndicator.h">
       <Filter>SignalAnalyzer</Filter>
     </ClInclude>
+    <ClInclude Include="MarketOrderBook.h">
+      <Filter>DataManager</Filter>
+    </ClInclude>
     <ClInclude Include="StockDef.h">
       <Filter>DataManager</Filter>
     </ClInclude>
@@ -175,6 +178,9 @@
     </ClCompile>
     <ClCompile Include="StockIndicator.cpp">
       <Filter>SignalAnalyzer</Filter>
+    </ClCompile>
+    <ClCompile Include="MarketOrderBook.cpp">
+      <Filter>DataManager</Filter>
     </ClCompile>
     <ClCompile Include="StockDef.cpp">
       <Filter>DataManager</Filter>

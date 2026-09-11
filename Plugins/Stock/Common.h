@@ -115,6 +115,9 @@ public:
 	// 带正负号的数值格式化：正数带"+"前缀，负数不带额外符号
 	static CString FormatSignedValue(double value, const CString& format = _T("%.2f"));
 
+	// 带正负号的数值格式化：正数带"+"前缀，负数不带额外符号
+	static CString prefixFormat(double value, const CString& suffix = _T(""));
+
 	// 判断股票代码是否为A股代码
 	static bool IsAGStockCode(const std::wstring& code);
 	// 判断股票代码是否为基金/ETF类标的

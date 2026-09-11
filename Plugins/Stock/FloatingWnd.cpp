@@ -421,6 +421,9 @@ void CFloatingWnd::OnPaint()
 		{
 			realtimeData = stockData->info;
 			chipData = stockData->chipDistribution;
+			// 数据与视图分离：行情推送时已在数据层更新模型，这里只同步到绘制的副本
+			m_orderBook.UpdateFromStockInfo(realtimeData);
+			m_orderBook.RefreshTransCache();
 			if (m_viewMode == UI_VIEW_DAY_KLINE)
 			{
 				auto klineObj = stockData->getKLineData();
@@ -744,7 +747,7 @@ void CFloatingWnd::OnPaint()
 			// 右侧盘口（竞价模式下始终显示盘口）
 			if (!isIndexKLine)
 			{
-				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData, klineData, m_viewMode);
+				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, m_orderBook, klineData, m_viewMode);
 			}
 		}
 		else if (!timelinePoint.empty())
@@ -1081,14 +1084,14 @@ void CFloatingWnd::OnPaint()
 			// 右侧盘口高度：不减xAxisLabelHeight（那是左侧走势图的时间标签，右侧不需要）
 			if (m_showTickDetail)
 			{
-				// 明细(MX)模式：在盘口区域绘制最近20条成交明细
+				// 明细(MX)模式：在盘口区域绘制最近成交明细
 				m_orderBookPanel.DrawTickDetail(memDC, chartWidth, w,
-					h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData);
+					h - headerHeight - indexBarHeight - relatedBarHeight, m_orderBook);
 			}
 			else if (m_showChipPeak)
 				m_chipPeakPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData, chipData, timelinePoint, m_viewMode);
 			else
-				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, realtimeData, klineData, m_viewMode);
+				m_orderBookPanel.Draw(memDC, chartWidth, w, h - headerHeight - indexBarHeight - relatedBarHeight, m_orderBook, klineData, m_viewMode);
 		}
 		else
 		{
@@ -1314,6 +1317,9 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 	// 非总览模式下的分时图双击（所有模式都支持）
 	if (m_viewMode != UI_VIEW_OVERVIEW && isDoubleClick)
 	{
+		PostMessage(FWND_MSG_SHOW_TRADE_DLG);  // 测试买卖点检测时暂时屏蔽交易记录弹窗
+		return;
+
 		CRect rect;
 		GetClientRect(&rect);
 		bool isIndex = (GetStockPriority(m_stock_id) < 200);
@@ -1430,7 +1436,7 @@ void CFloatingWnd::OnLButtonDown(UINT nFlags, CPoint point)
 				const auto& item = timelinePoint[countX];
 				m_pendingTradeTime = item.time.c_str();
 				m_pendingTradePrice = item.price;
-				// PostMessage(FWND_MSG_SHOW_TRADE_DLG);  // 测试买卖点检测时暂时屏蔽交易记录弹窗
+
 				CSmartSignalTestDlg::Show(m_stock_id, countX, m_viewMode, m_pendingTradePrice, m_pendingTradeTime, this);
 				return;
 			}
@@ -2782,11 +2788,11 @@ LRESULT CFloatingWnd::OnShowAddDialog(WPARAM wParam, LPARAM lParam)
 LRESULT CFloatingWnd::OnShowTradeDialog(WPARAM wParam, LPARAM lParam)
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
-	/* 测试买卖点检测时暂时屏蔽交易记录弹窗
+	//测试买卖点检测时暂时屏蔽交易记录弹窗
 	CTradeRecordDialog dlg(this);
 	dlg.SetTradeInfo(m_pendingTradeTime, m_pendingTradePrice, CString(m_stock_id.c_str()));
 	dlg.DoModal();
-	*/
+
 	return 0;
 }
 

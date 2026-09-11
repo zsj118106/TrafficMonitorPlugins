@@ -118,7 +118,7 @@ void CRelateStockDlg::SetCellRatioText(int row, double ratio)
 {
 	// 占比取值范围为0~1，显示2位小数
 	CString str;
-	str.Format(_T("%.2f"), ratio);
+	str.Format(_T("%.4f"), ratio);
 	m_list.SetItemText(row, 1, str);
 }
 
@@ -133,7 +133,7 @@ void CRelateStockDlg::LoadRatioToEdit(int row)
 	else
 	{
 		CString str;
-		str.Format(_T("%.2f"), it->second);
+		str.Format(_T("%.4f"), it->second);
 		m_ratio_edit.SetWindowText(str);
 	}
 }

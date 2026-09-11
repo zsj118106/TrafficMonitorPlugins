@@ -144,6 +144,24 @@ void STOCK::StockData::UpdateOrderPriceAccum()
 	}
 }
 
+RegResult STOCK::StockData::CalTimeLineTrend()
+{
+	std::vector<double> values;
+	auto timelineData = MakesureHistoricalData<TimelineData>(Period::TIMELINE);
+	if (timelineData && !timelineData->data.empty())
+	{
+		auto& vecData = timelineData->data;
+		size_t n = 6;
+		size_t takeCnt = (std::min)(n, vecData.size());
+		for (auto it = vecData.end() - takeCnt; it != vecData.end(); ++it)
+		{
+			values.emplace_back(static_cast<double>(it->price));
+		}
+	}
+
+	return CSignalAnalyzer::CalcLinearReg(values, 6, true);
+}
+
 void STOCK::StockMarket::LoadInnerOuterData(std::string data)
 {
 	if (data.empty())
@@ -749,6 +767,14 @@ void STOCK::StockInfo::LoadHF(std::vector<std::string> data, size_t size)
 
 	if (data.size() >= 15)
 		volume = { convert<Volume>(data[14]) };
+}
+
+double StockInfo::GetPriceChange() const
+{
+	double displayPrice = currentPrice > 0 ? currentPrice : prevClosePrice;
+	double diffPercent = prevClosePrice != 0 ? ((displayPrice - prevClosePrice) / prevClosePrice) * 100 : 0;
+
+	return diffPercent;
 }
 
 bool StockInfo::IsETF() const
